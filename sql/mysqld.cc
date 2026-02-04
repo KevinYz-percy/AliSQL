@@ -7918,6 +7918,11 @@ int mysqld_main(int argc, char **argv)
 
   if (myduck::DuckdbManager::CreateInstance()) unireg_abort(MYSQLD_ABORT_EXIT);
 
+  // Initialize DuckDB early if needed for crash recovery
+  // This ensures WAL replay happens at startup rather than on first request
+  if (myduck::DuckdbManager::InitializeIfNeeded())
+    unireg_abort(MYSQLD_ABORT_EXIT);
+
   if (init_server_components()) unireg_abort(MYSQLD_ABORT_EXIT);
 
   if (!server_id_supplied)

@@ -35,6 +35,8 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "sql/duckdb/duckdb_timezone.h"
 #include "sql/mysqld.h"
 
+#include <sys/stat.h>
+
 namespace myduck {
 
 DuckdbManager *DuckdbManager::m_instance = nullptr;
@@ -144,6 +146,55 @@ std::shared_ptr<duckdb::Connection> DuckdbManager::CreateConnection() {
   auto &instance = Get();
   auto connection = std::make_shared<duckdb::Connection>(*instance.m_database);
   return connection;
+}
+
+bool DuckdbManager::DataFilesExist() {
+  char path[FN_REFLEN];
+  struct stat st;
+
+  // Check for main database file: duckdb.db
+  fn_format(path, DUCKDB_FILE_NAME, mysql_real_data_home, "", MYF(0));
+  if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+    return true;
+  }
+
+  // Check for WAL file: duckdb.db.wal
+  fn_format(path, DUCKDB_FILE_NAME, mysql_real_data_home, ".wal", MYF(0));
+  if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+    return true;
+  }
+
+  return false;
+}
+
+bool DuckdbManager::InitializeIfNeeded() {
+  if (m_instance == nullptr) {
+    return true;
+  }
+
+  // Check if we need to initialize DuckDB at startup:
+  // 1. DuckDB mode is ON, or
+  // 2. DuckDB data files exist (need crash recovery)
+  bool need_init = global_mode_on() || DataFilesExist();
+
+  if (!need_init) {
+    return false;
+  }
+
+  if (DataFilesExist()) {
+    LogErr(INFORMATION_LEVEL, ER_DUCKDB,
+           "DuckDB data files detected, initializing for crash recovery.");
+  }
+
+  // Trigger initialization (which includes crash recovery via WAL replay)
+  bool ret = m_instance->Initialize();
+  if (ret) {
+    LogErr(ERROR_LEVEL, ER_DUCKDB,
+           "DuckdbManager::InitializeIfNeeded failed.");
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace myduck

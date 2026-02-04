@@ -50,7 +50,18 @@ class DuckdbManager {
 
   static std::shared_ptr<duckdb::Connection> CreateConnection();
 
-private:
+  /**
+   * Initialize DuckDB if needed at startup.
+   * This should be called after CreateInstance() to trigger crash recovery
+   * when:
+   * 1. DuckDB mode is ON (global_mode == DUCKDB_ON), or
+   * 2. DuckDB data files exist in the data directory
+   *
+   * @return true on error, false on success
+   */
+  static bool InitializeIfNeeded();
+
+ private:
   static DuckdbManager *m_instance;
 
   DuckdbManager();
@@ -58,6 +69,14 @@ private:
   ~DuckdbManager();
 
   bool Initialize();
+
+  /**
+   * Check if DuckDB data files exist in the data directory.
+   * Looks for duckdb.db file or WAL files.
+   *
+   * @return true if DuckDB data files exist
+   */
+  static bool DataFilesExist();
 
   duckdb::DuckDB *m_database = nullptr;
 

@@ -81,7 +81,6 @@ mkdir -p \
 cat > "$DIR/alisql.cnf" <<EOF2
 [mysqld]
 # --- Paths ---
-basedir =
 datadir = ${DIR}/data/dbs
 socket  = ${DIR}/run/mysql.sock
 pid-file = ${DIR}/run/mysqld.pid
