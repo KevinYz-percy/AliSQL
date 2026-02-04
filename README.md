@@ -3,7 +3,7 @@
 AliSQL is Alibaba's MySQL branch, forked from official MySQL and used extensively in Alibaba Group's production environment. It includes various performance optimizations, stability improvements, and features tailored for large-scale applications.
 
 - [AliSQL](#alisql)
-  - [🚀 Quick Start (DuckDB)](#-quick-start-duckdb)
+  - [Quick Start (DuckDB)](#-quick-start-duckdb)
   - [Version Information](#version-information)
   - [Features](#features)
   - [Roadmap](#roadmap)
@@ -13,7 +13,7 @@ AliSQL is Alibaba's MySQL branch, forked from official MySQL and used extensivel
   - [License](#license)
   - [See Also](#see-also)
 
-## 🚀 Quick Start (DuckDB)
+## Quick Start (DuckDB)
 
 > **Quickly build your DuckDB node:** **[How to set up a DuckDB node](./wiki/duckdb/how-to-setup-duckdb-node-en.md)**
 
