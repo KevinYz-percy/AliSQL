@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.alicdn.com/imgextra/i2/O1CN01dPPLYy1Igf8GHqNIK_!!6000000000921-2-tps-1024-1024.png" width="180" alt="AliSQL Logo"/>
+  <img src="./alisql-logo.png" width="180" alt="AliSQL Logo"/>
 </p>
 
 <h1 align="center">AliSQL</h1>
