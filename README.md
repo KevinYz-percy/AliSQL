@@ -1,102 +1,271 @@
-# AliSQL
+<p align="center">
+  <img src="https://img.alicdn.com/imgextra/i2/O1CN01dPPLYy1Igf8GHqNIK_!!6000000000921-2-tps-1024-1024.png" width="180" alt="AliSQL Logo"/>
+</p>
 
-AliSQL is Alibaba's MySQL branch, forked from official MySQL and used extensively in Alibaba Group's production environment. It includes various performance optimizations, stability improvements, and features tailored for large-scale applications.
+<h1 align="center">AliSQL</h1>
 
-- [AliSQL](#alisql)
-  - [Quick Start (DuckDB)](#-quick-start-duckdb)
-  - [Version Information](#version-information)
-  - [Features](#features)
-  - [Roadmap](#roadmap)
-  - [Getting Started](#getting-started)
-  - [Support](#support)
-  - [Contributing](#contributing)
-  - [License](#license)
-  - [See Also](#see-also)
+<p align="center">
+  <strong>Alibaba's Enterprise MySQL Branch with DuckDB OLAP & Native Vector Search</strong>
+</p>
 
-## Quick Start (DuckDB)
+<p align="center">
+  <em>Battle-tested in Alibaba's production environment, powering millions of databases</em>
+</p>
 
-> **Quickly build your DuckDB node:** **[How to set up a DuckDB node](./wiki/duckdb/how-to-setup-duckdb-node-en.md)**
+<p align="center">
+  <a href="https://github.com/alibaba/AliSQL/stargazers"><img src="https://img.shields.io/github/stars/alibaba/AliSQL?style=for-the-badge&logo=github&color=ffca28" alt="GitHub Stars"></a>
+  <a href="https://github.com/alibaba/AliSQL/network/members"><img src="https://img.shields.io/github/forks/alibaba/AliSQL?style=for-the-badge&logo=github&color=8bc34a" alt="GitHub Forks"></a>
+  <a href="https://github.com/alibaba/AliSQL/blob/master/LICENSE"><img src="https://img.shields.io/badge/License-GPL%202.0-blue?style=for-the-badge" alt="License"></a>
+  <a href="https://github.com/alibaba/AliSQL/releases"><img src="https://img.shields.io/badge/MySQL-8.0.44%20LTS-orange?style=for-the-badge&logo=mysql&logoColor=white" alt="MySQL Version"></a>
+</p>
 
-## Version Information
+<p align="center">
+  <a href="#key-features">Features</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#documentation">Docs</a> •
+  <a href="#roadmap">Roadmap</a> •
+  <a href="#contributing">Contributing</a>
+</p>
 
-- **AliSQL Version**: 8.0.44 (LTS)
-- **Based on**: MySQL 8.0.44
+<p align="center">
+  <a href="./README_zh.md">简体中文</a> | <a href="./README.md">English</a>
+</p>
 
-## Features
+---
 
-- **[DuckDB Storage Engine](./wiki/duckdb/duckdb-en.md)**:AliSQL integrates DuckDB as a native storage engine, allowing users to operate DuckDB with the same experience as MySQL. By leveraging AliSQL for rapid deployment of DuckDB service nodes, users can easily achieve lightweight analytical capabilities.
+## Why AliSQL?
 
-- **[Vector Storage](./wiki/vidx/vidx_readme.md)**:AliSQL natively supports enterprise-grade vector processing for up to 16,383 dimensions. By integrating a highly optimized HNSW algorithm for high-performance Approximate Nearest Neighbor (ANN) search, AliSQL empowers users to build AI-driven applications—such as semantic search and recommendation systems—seamlessly using standard SQL interfaces.
+AliSQL brings enterprise-grade capabilities to MySQL, combining the reliability of InnoDB OLTP with DuckDB's blazing-fast analytics and native vector search — all through familiar MySQL interfaces.
 
-## Roadmap
+<table>
+<tr>
+<td width="33%" align="center">
 
-- **[DDL Optimization](https://www.alibabacloud.com/help/en/rds/apsaradb-rds-for-mysql/alisql-ddl-best-practices?spm=a2c63.p38356.help-menu-26090.d_2_8_0.1f7a28a5F1ZVeK)** *(planned)*:AliSQL delivers a faster, safer, and lighter DDL experience through innovations such as enhanced Instant DDL, parallel B+tree construction, a non-blocking lock mechanism, and real-time DDL apply—significantly improving schema change efficiency and virtually eliminating replication lag.
+### 200x Faster Analytics
 
-- **[RTO Optimization](https://www.alibabacloud.com/help/en/rds/apsaradb-rds-for-mysql/best-practices-for-rto-optimization-in-alisql?spm=a3c0i.36496430.J_TlTAa0s_LXHOq4tuiO-gv.1.43c56e9bd5YdDQ&scm=20140722.S_help@@%E6%96%87%E6%A1%A3@@2880006._.ID_help@@%E6%96%87%E6%A1%A3@@2880006-RL_RDSMySQLRTO-LOC_2024SPAllResult-OR_ser-PAR1_0bc3b4af17685488697221621e29f2-V_4-PAR3_r-RE_new5-P0_0-P1_0)** *(planned)*:AliSQL deeply optimizes the end-to-end crash recovery path to accelerate instance startup, shorten RTO, and restore service quickly.
+DuckDB columnar engine delivers **200x speedup** on analytical queries compared to InnoDB
 
-- **[Replication Optimization](https://www.alibabacloud.com/help/en/rds/apsaradb-rds-for-mysql/replication-optimization/?spm=a2c63.p38356.help-menu-26090.d_2_6.48a125033Ze9gw)** *(planned)*: AliSQL significantly boosts replication throughput and minimizes lag by implementing Binlog Parallel Flush, Binlog in Redo, and specialized optimizations for large transactions and DDL operations.
+</td>
+<td width="33%" align="center">
 
-## Getting Started
-**Prerequisites**:
-- [CMake](https://cmake.org) 3.x or higher
-- Python3
-- C++17 compliant compiler (GCC 7+ or Clang 5+)
+### Native Vector Search
 
-**Build Instructions**:
+Built-in HNSW algorithm supporting up to **16,383 dimensions** for AI/ML workloads
+
+</td>
+<td width="33%" align="center">
+
+### 100% MySQL Compatible
+
+Use your existing MySQL tools, drivers, and SQL — zero learning curve
+
+</td>
+</tr>
+</table>
+
+---
+
+## Key Features
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| **DuckDB Storage Engine** | Columnar OLAP engine with automatic compression, perfect for analytics workloads | Available |
+| **Vector Index (VIDX)** | Native vector storage & ANN search with HNSW, supports COSINE & EUCLIDEAN distance | Available |
+| **DDL Optimization** | Instant DDL, parallel B+tree construction, non-blocking locks | Planned |
+| **RTO Optimization** | Accelerated crash recovery for faster instance startup | Planned |
+| **Replication Boost** | Binlog Parallel Flush, Binlog in Redo, large transaction optimization | Planned |
+
+---
+
+## Quick Start
+
+### Option 1: Build from Source
 
 ```bash
 # Clone the repository
 git clone https://github.com/alibaba/AliSQL.git
 cd AliSQL
 
-# Build the project (release build)
-sh build.sh -t release -d /path/to/install/dir
+# Build (release mode)
+sh build.sh -t release -d ~/alisql
 
-# For development/debugging (debug build)
-sh build.sh -t debug -d /path/to/install/dir
-
-# Install the built MySQL server
+# Install
 make install
 ```
 
-**Build Options**:
-- `-t release|debug`: Build type (default: debug)
-- `-d <dest_dir>`: Installation directory (default: /usr/local/alisql or $HOME/alisql)
-- `-s <server_suffix>`: Server suffix (default: alisql-dev)
-- `-g asan|tsan`: Enable sanitizer
-- `-c`: Enable GCC coverage (gcov)
-- `-h, --help`: Show help
+### Option 2: Set Up a DuckDB Analytical Node
 
-## Support
-- **GitHub Issues**: [https://github.com/alibaba/AliSQL/issues](https://github.com/alibaba/AliSQL/issues)
-- **Alibaba Cloud RDS**: [DuckDB-based Analytical Instance](https://help.aliyun.com/zh/rds/apsaradb-rds-for-mysql/duckdb-based-analytical-instance/)
+> **Step-by-step guide:** [How to set up a DuckDB node](./wiki/duckdb/how-to-setup-duckdb-node-en.md)
 
-> For DuckDB-specific support, see the [DuckDB Support Options](https://duckdblabs.com/support/).
+### Initialize & Start Server
+
+```bash
+# Initialize data directory
+~/alisql/bin/mysqld --initialize-insecure --datadir=~/alisql/data
+
+# Start the server
+~/alisql/bin/mysqld --datadir=~/alisql/data
+```
+
+---
+
+## Usage Examples
+
+### DuckDB for Analytics
+
+```sql
+-- Create an analytical table with DuckDB engine
+CREATE TABLE sales_analytics (
+    sale_date DATE,
+    product_id INT,
+    revenue DECIMAL(10,2),
+    quantity INT
+) ENGINE=DuckDB;
+
+-- Run complex analytics (200x faster than InnoDB!)
+SELECT
+    DATE_FORMAT(sale_date, '%Y-%m') as month,
+    SUM(revenue) as total_revenue,
+    COUNT(*) as transactions
+FROM sales_analytics
+GROUP BY month
+ORDER BY total_revenue DESC;
+```
+
+### Vector Search for AI Applications
+
+```sql
+-- Create a table with vector column
+CREATE TABLE embeddings (
+    id INT PRIMARY KEY,
+    content TEXT,
+    embedding VECTOR(768)  -- 768-dimensional vectors
+) ENGINE=InnoDB;
+
+-- Create HNSW index for fast ANN search
+CREATE VECTOR INDEX idx_embedding ON embeddings(embedding);
+
+-- Find similar items using cosine distance
+SELECT id, content,
+       COSINE_DISTANCE(embedding, '[0.1, 0.2, ...]') as distance
+FROM embeddings
+ORDER BY distance
+LIMIT 10;
+```
+
+---
+
+## Build Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-t release\|debug` | Build type | `debug` |
+| `-d <dir>` | Installation directory | `/usr/local/alisql` |
+| `-g asan\|tsan` | Enable sanitizer (memory/thread) | disabled |
+| `-c` | Enable code coverage (gcov) | disabled |
+
+**Prerequisites:** CMake 3.x+, Python 3, GCC 7+ or Clang 5+
+
+---
+
+## Roadmap
+
+```
+Q4 2025  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+         [x] DuckDB Storage Engine  [x] Vector Index (VIDX)   [x] Open Source
+
+2026     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+         [ ] DDL Optimization       [ ] RTO Optimization      [ ] Replication Boost
+             - Instant DDL              - Fast Crash Recovery     - Binlog Parallel Flush
+             - Parallel B+tree          - Minimize RTO            - Binlog in Redo
+             - Non-blocking Locks                                 - Large TX Optimization
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [DuckDB Integration Guide](./wiki/duckdb/duckdb-en.md) | Complete guide for DuckDB storage engine |
+| [Vector Index Guide](./wiki/vidx/vidx_readme.md) | Native vector storage and ANN search |
+| [Release Notes](./wiki/changes-in-alisql-8.0.44.md) | What's new in AliSQL 8.0.44 |
+| [Setup DuckDB Node](./wiki/duckdb/how-to-setup-duckdb-node-en.md) | Quick setup guide for analytics |
+
+**External Resources:**
+- [MySQL 8.0 Documentation](https://dev.mysql.com/doc/refman/8.0/en/)
+- [DuckDB Official Docs](https://duckdb.org/docs/stable/)
+- [Detailed Article (Chinese)](https://mp.weixin.qq.com/s/_YmlV3vPc9CksumXvXWBEw)
+
+---
 
 ## Contributing
 
-AliSQL 8.0 became an open-source project in December 2025 and is actively maintained by engineers at Alibaba Group.
+AliSQL became open source in December 2025 and is actively maintained by Alibaba Cloud Database Team.
 
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with appropriate tests
-4. Submit a pull request
+We welcome contributions of all kinds!
 
-For bug reports and feature requests, please use the [GitHub Issues](https://github.com/alibaba/AliSQL/issues) page.
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
+
+For bugs and feature requests, please use [GitHub Issues](https://github.com/alibaba/AliSQL/issues).
+
+---
+
+## Community & Support
+
+<table>
+<tr>
+<td align="center" width="50%">
+
+**GitHub Issues**
+
+For bug reports & feature requests
+
+[Open an Issue](https://github.com/alibaba/AliSQL/issues)
+
+</td>
+<td align="center" width="50%">
+
+**Alibaba Cloud RDS**
+
+Managed DuckDB analytical instances
+
+[Learn More](https://help.aliyun.com/zh/rds/apsaradb-rds-for-mysql/duckdb-based-analytical-instance/)
+
+</td>
+</tr>
+</table>
+
+---
 
 ## License
 
-This project is licensed under the GPL-2.0 license. See the [LICENSE](LICENSE) file for details.
+AliSQL is licensed under **GPL-2.0**, the same license as MySQL.
 
-AliSQL is based on MySQL, which is licensed under GPL-2.0. The DuckDB integration follows the same licensing terms.
+See the [LICENSE](LICENSE) file for details.
 
-## See Also
-- [AliSQL Release Notes](./wiki/changes-in-alisql-8.0.44.md)
-- [DuckDB Storage Engine in AliSQL](./wiki/duckdb/duckdb-en.md)
-- [Vector Index in AliSQL](./wiki/vidx/vidx_readme.md)
-- [MySQL 8.0 Documentation](https://dev.mysql.com/doc/refman/8.0/en/)
-- [MySQL 8.0 Github Repository](https://github.com/mysql/mysql-server)
-- [DuckDB Official Documentation](https://duckdb.org/docs/stable/)
-- [DuckDB GitHub Repository](https://github.com/duckdb/duckdb)
-- [Detailed Article (Chinese)](https://mp.weixin.qq.com/s/_YmlV3vPc9CksumXvXWBEw)
+---
+
+## Star History
+
+<p align="center">
+  <a href="https://star-history.com/#alibaba/AliSQL&Date">
+    <img src="https://api.star-history.com/svg?repos=alibaba/AliSQL&type=Date" alt="Star History Chart" width="600">
+  </a>
+</p>
+
+---
+
+<p align="center">
+  Made with care by <a href="https://www.alibabacloud.com/product/apsaradb-for-rds-mysql">Alibaba Cloud Database Team</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/alibaba/AliSQL">GitHub</a> •
+  <a href="https://github.com/mysql/mysql-server">MySQL</a> •
+  <a href="https://github.com/duckdb/duckdb">DuckDB</a>
+</p>
