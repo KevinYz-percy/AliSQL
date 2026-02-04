@@ -31,8 +31,6 @@
   <a href="./README_zh.md">简体中文</a> | <a href="./README.md">English</a>
 </p>
 
----
-
 ## Why AliSQL?
 
 AliSQL brings enterprise-grade capabilities to MySQL, combining the reliability of InnoDB OLTP with DuckDB's blazing-fast analytics and native vector search — all through familiar MySQL interfaces.
@@ -63,8 +61,6 @@ Use your existing MySQL tools, drivers, and SQL — zero learning curve
 </tr>
 </table>
 
----
-
 ## Key Features
 
 | Feature | Description | Status |
@@ -74,8 +70,6 @@ Use your existing MySQL tools, drivers, and SQL — zero learning curve
 | **DDL Optimization** | Instant DDL, parallel B+tree construction, non-blocking locks | Planned |
 | **RTO Optimization** | Accelerated crash recovery for faster instance startup | Planned |
 | **Replication Boost** | Binlog Parallel Flush, Binlog in Redo, large transaction optimization | Planned |
-
----
 
 ## Quick Start
 
@@ -106,8 +100,6 @@ make install
 # Start the server
 ~/alisql/bin/mysqld --datadir=~/alisql/data
 ```
-
----
 
 ## Usage Examples
 
@@ -153,8 +145,6 @@ ORDER BY distance
 LIMIT 10;
 ```
 
----
-
 ## Build Options
 
 | Option | Description | Default |
@@ -165,8 +155,6 @@ LIMIT 10;
 | `-c` | Enable code coverage (gcov) | disabled |
 
 **Prerequisites:** CMake 3.x+, Python 3, GCC 7+ or Clang 5+
-
----
 
 ## Roadmap
 
@@ -180,8 +168,6 @@ Q4 2025  ━━━━━━━━━━━━━━━━━━━━━━━�
              - Parallel B+tree          - Minimize RTO            - Binlog in Redo
              - Non-blocking Locks                                 - Large TX Optimization
 ```
-
----
 
 ## Documentation
 
@@ -197,8 +183,6 @@ Q4 2025  ━━━━━━━━━━━━━━━━━━━━━━━�
 - [DuckDB Official Docs](https://duckdb.org/docs/stable/)
 - [Detailed Article (Chinese)](https://mp.weixin.qq.com/s/_YmlV3vPc9CksumXvXWBEw)
 
----
-
 ## Contributing
 
 AliSQL became open source in December 2025 and is actively maintained by Alibaba Cloud Database Team.
@@ -212,8 +196,6 @@ We welcome contributions of all kinds!
 5. **Open** a Pull Request
 
 For bugs and feature requests, please use [GitHub Issues](https://github.com/alibaba/AliSQL/issues).
-
----
 
 ## Community & Support
 
@@ -240,15 +222,11 @@ Managed DuckDB analytical instances
 </tr>
 </table>
 
----
-
 ## License
 
 AliSQL is licensed under **GPL-2.0**, the same license as MySQL.
 
 See the [LICENSE](LICENSE) file for details.
-
----
 
 ## Star History
 
@@ -257,8 +235,6 @@ See the [LICENSE](LICENSE) file for details.
     <img src="https://api.star-history.com/svg?repos=alibaba/AliSQL&type=Date" alt="Star History Chart" width="600">
   </a>
 </p>
-
----
 
 <p align="center">
   Made with care by <a href="https://www.alibabacloud.com/product/apsaradb-for-rds-mysql">Alibaba Cloud Database Team</a>

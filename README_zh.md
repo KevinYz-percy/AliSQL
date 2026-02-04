@@ -31,8 +31,6 @@
   <a href="./README_zh.md">简体中文</a> | <a href="./README.md">English</a>
 </p>
 
----
-
 ## 为什么选择 AliSQL？
 
 AliSQL 为 MySQL 带来企业级能力，将 InnoDB 可靠的 OLTP 性能与 DuckDB 极速的分析能力和原生向量搜索相结合 - 全部通过熟悉的 MySQL 接口使用。
@@ -63,8 +61,6 @@ DuckDB 列式引擎相比 InnoDB，分析查询性能提升 **200 倍**
 </tr>
 </table>
 
----
-
 ## 核心特性
 
 | 特性 | 描述 | 状态 |
@@ -74,8 +70,6 @@ DuckDB 列式引擎相比 InnoDB，分析查询性能提升 **200 倍**
 | **DDL 优化** | Instant DDL、并行 B+树构建、非阻塞锁机制 | 规划中 |
 | **RTO 优化** | 加速崩溃恢复，缩短实例启动时间 | 规划中 |
 | **复制增强** | Binlog 并行刷盘、Binlog in Redo、大事务优化 | 规划中 |
-
----
 
 ## 快速开始
 
@@ -106,8 +100,6 @@ make install
 # 启动服务
 ~/alisql/bin/mysqld --datadir=~/alisql/data
 ```
-
----
 
 ## 使用示例
 
@@ -153,8 +145,6 @@ ORDER BY distance
 LIMIT 10;
 ```
 
----
-
 ## 构建选项
 
 | 选项 | 描述 | 默认值 |
@@ -165,8 +155,6 @@ LIMIT 10;
 | `-c` | 启用代码覆盖率 (gcov) | 禁用 |
 
 **前置依赖：** CMake 3.x+、Python 3、GCC 7+ 或 Clang 5+
-
----
 
 ## 路线图
 
@@ -180,8 +168,6 @@ LIMIT 10;
              - 并行 B+树构建             - 最小化 RTO               - Binlog in Redo
              - 非阻塞锁机制                                        - 大事务优化
 ```
-
----
 
 ## 文档
 
@@ -197,8 +183,6 @@ LIMIT 10;
 - [DuckDB 官方文档](https://duckdb.org/docs/stable/)
 - [技术详解文章](https://mp.weixin.qq.com/s/_YmlV3vPc9CksumXvXWBEw)
 
----
-
 ## 参与贡献
 
 AliSQL 于 2025 年 12 月正式开源，由阿里云数据库团队持续维护。
@@ -212,8 +196,6 @@ AliSQL 于 2025 年 12 月正式开源，由阿里云数据库团队持续维护
 5. **发起** Pull Request
 
 如有 Bug 反馈或功能建议，请通过 [GitHub Issues](https://github.com/alibaba/AliSQL/issues) 提交。
-
----
 
 ## 社区与支持
 
@@ -240,15 +222,11 @@ Bug 反馈与功能建议
 </tr>
 </table>
 
----
-
 ## 开源协议
 
 AliSQL 采用 **GPL-2.0** 协议开源，与 MySQL 保持一致。
 
 详见 [LICENSE](LICENSE) 文件。
-
----
 
 ## Star 趋势
 
@@ -257,8 +235,6 @@ AliSQL 采用 **GPL-2.0** 协议开源，与 MySQL 保持一致。
     <img src="https://api.star-history.com/svg?repos=alibaba/AliSQL&type=Date" alt="Star History Chart" width="600">
   </a>
 </p>
-
----
 
 <p align="center">
   由 <a href="https://www.alibabacloud.com/product/apsaradb-for-rds-mysql">阿里云数据库团队</a> 精心打造
