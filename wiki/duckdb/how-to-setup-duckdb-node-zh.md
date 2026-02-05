@@ -108,7 +108,7 @@ duckdb_mode=ON
 force_innodb_to_duckdb=ON
 
 # DuckDB resources (0 = auto)
-duckdb_memory_limit=0
+duckdb_memory_limit=2147483648
 duckdb_threads=0
 duckdb_temp_directory=${DIR}/tmp
 EOF2
@@ -187,7 +187,7 @@ ALTER TABLE t RENAME TO t_new;
 duckdb_mode=ON
 force_innodb_to_duckdb=ON
 
-duckdb_memory_limit=0
+duckdb_memory_limit=2147483648
 duckdb_threads=0
 duckdb_temp_directory=/path/to/duckdb_temp_dir
 

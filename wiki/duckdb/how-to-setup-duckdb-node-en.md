@@ -175,7 +175,7 @@ Use this when you want to migrate existing InnoDB tables to DuckDB to boost anal
 duckdb_mode=ON
 force_innodb_to_duckdb=ON
 
-duckdb_memory_limit=0
+duckdb_memory_limit=2147483648
 duckdb_threads=0
 duckdb_temp_directory=/path/to/duckdb_temp_dir
 
