@@ -1,0 +1,99 @@
+###############################################################################
+# Test for --sql-safe-updates command line option                             #
+#                                                                             #
+# This test verifies that the --sql-safe-updates command line option works    #
+# correctly to set the global default value for sql_safe_updates.             #
+#                                                                             #
+# The server is started with --sql-safe-updates=1 (see .opt file)             #
+###############################################################################
+
+# Force restart after test because we modify global sql_safe_updates
+--source include/force_restart.inc
+
+--echo #
+--echo # Test 1: Verify global and session default values are ON
+--echo #         when server is started with --sql-safe-updates=1
+--echo #
+
+SELECT @@global.sql_safe_updates AS global_value;
+SELECT @@session.sql_safe_updates AS session_value;
+
+--echo #
+--echo # Test 2: Verify that sql_safe_updates is enforced
+--echo #         (UPDATE without WHERE using KEY should fail)
+--echo #
+
+CREATE TABLE t1 (id INT PRIMARY KEY, name VARCHAR(50));
+INSERT INTO t1 VALUES (1, 'test1'), (2, 'test2'), (3, 'test3');
+
+--echo # This should fail with sql_safe_updates enabled
+--error ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE
+UPDATE t1 SET name = 'updated';
+
+--echo # This should fail with sql_safe_updates enabled
+--error ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE
+DELETE FROM t1;
+
+--echo # UPDATE with WHERE using KEY column should succeed
+UPDATE t1 SET name = 'updated1' WHERE id = 1;
+SELECT * FROM t1 WHERE id = 1;
+
+--echo #
+--echo # Test 3: Verify session can override the global value
+--echo #
+
+SET SESSION sql_safe_updates = OFF;
+SELECT @@session.sql_safe_updates AS session_after_off;
+SELECT @@global.sql_safe_updates AS global_unchanged;
+
+--echo # Now UPDATE without WHERE should succeed
+UPDATE t1 SET name = 'all_updated';
+SELECT * FROM t1 ORDER BY id;
+
+--echo #
+--echo # Test 4: Verify new session inherits global value
+--echo #
+
+--echo # Reconnect to get a new session
+--connect (con1, localhost, root,,)
+
+SELECT @@session.sql_safe_updates AS new_session_value;
+SELECT @@global.sql_safe_updates AS global_value;
+
+--echo # UPDATE without WHERE should fail in new session
+--error ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE
+UPDATE t1 SET name = 'fail';
+
+--connection default
+--disconnect con1
+
+--echo #
+--echo # Test 5: Verify SET GLOBAL works
+--echo #
+
+SET GLOBAL sql_safe_updates = OFF;
+SELECT @@global.sql_safe_updates AS global_after_set_off;
+
+--echo # Reconnect to verify new session gets the new global value
+--connect (con2, localhost, root,,)
+
+SELECT @@session.sql_safe_updates AS new_session_inherits_global;
+
+--echo # UPDATE without WHERE should now succeed in new session
+UPDATE t1 SET name = 'success';
+SELECT * FROM t1 ORDER BY id;
+
+--connection default
+--disconnect con2
+
+--echo #
+--echo # Cleanup
+--echo #
+
+# Reset to default OFF to avoid affecting MTR check_warnings
+SET GLOBAL sql_safe_updates = OFF;
+DROP TABLE t1;
+
+--echo #
+--echo # Test completed successfully
+--echo #

@@ -1048,6 +1048,8 @@ const char *my_localhost = "localhost";
 bool opt_large_files = sizeof(my_off_t) > 4;
 static bool opt_autocommit;  ///< for --autocommit command-line option
 static get_opt_arg_source source_autocommit;
+static bool opt_sql_safe_updates;  ///< for --sql-safe-updates command-line option
+static get_opt_arg_source source_sql_safe_updates;
 
 /*
   Used with --help for detailed option
@@ -9283,6 +9285,14 @@ struct my_option my_long_options[] = {
      "Option used by mysql-test for debugging and testing of replication.",
      &opt_sporadic_binlog_dump_fail, &opt_sporadic_binlog_dump_fail, nullptr,
      GET_BOOL, NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
+    /*
+      Because Sys_var_bit does not support command-line options, we need to
+      explicitly add one for --sql-safe-updates
+    */
+    {"sql-safe-updates", 0, "Set default value for sql_safe_updates (0 or 1)",
+     &opt_sql_safe_updates, &opt_sql_safe_updates, nullptr, GET_BOOL, OPT_ARG,
+     0, 0, 0, &source_sql_safe_updates, /* arg_source, to be copied to Sys_var */
+     0, nullptr},
     {"ssl", OPT_USE_SSL,
      "Enable SSL for connection (automatically enabled with other flags).",
      &opt_use_ssl, &opt_use_ssl, nullptr, GET_BOOL, OPT_ARG, 1, 0, 0, nullptr,
@@ -11269,6 +11279,12 @@ static int get_options(int *argc_ptr, char ***argv_ptr) {
   assert(opt->arg_source != nullptr);
   Sys_autocommit_ptr->set_source_name(opt->arg_source->m_path_name);
   Sys_autocommit_ptr->set_source(opt->arg_source->m_source);
+
+  // Synchronize @@global.sql_safe_updates value on --sql-safe-updates
+  if (opt_sql_safe_updates)
+    global_system_variables.option_bits |= OPTION_SAFE_UPDATES;
+  else
+    global_system_variables.option_bits &= ~OPTION_SAFE_UPDATES;
 
   global_system_variables.sql_mode =
       expand_sql_mode(global_system_variables.sql_mode, nullptr);

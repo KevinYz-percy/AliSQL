@@ -1,0 +1,83 @@
+#
+# Test 1: Verify global and session default values are ON
+#         when server is started with --sql-safe-updates=1
+#
+SELECT @@global.sql_safe_updates AS global_value;
+global_value
+1
+SELECT @@session.sql_safe_updates AS session_value;
+session_value
+1
+#
+# Test 2: Verify that sql_safe_updates is enforced
+#         (UPDATE without WHERE using KEY should fail)
+#
+CREATE TABLE t1 (id INT PRIMARY KEY, name VARCHAR(50));
+INSERT INTO t1 VALUES (1, 'test1'), (2, 'test2'), (3, 'test3');
+# This should fail with sql_safe_updates enabled
+UPDATE t1 SET name = 'updated';
+ERROR HY000: You are using safe update mode and you tried to update a table without a WHERE that uses a KEY column. 
+# This should fail with sql_safe_updates enabled
+DELETE FROM t1;
+ERROR HY000: You are using safe update mode and you tried to update a table without a WHERE that uses a KEY column. 
+# UPDATE with WHERE using KEY column should succeed
+UPDATE t1 SET name = 'updated1' WHERE id = 1;
+SELECT * FROM t1 WHERE id = 1;
+id	name
+1	updated1
+#
+# Test 3: Verify session can override the global value
+#
+SET SESSION sql_safe_updates = OFF;
+SELECT @@session.sql_safe_updates AS session_after_off;
+session_after_off
+0
+SELECT @@global.sql_safe_updates AS global_unchanged;
+global_unchanged
+1
+# Now UPDATE without WHERE should succeed
+UPDATE t1 SET name = 'all_updated';
+SELECT * FROM t1 ORDER BY id;
+id	name
+1	all_updated
+2	all_updated
+3	all_updated
+#
+# Test 4: Verify new session inherits global value
+#
+# Reconnect to get a new session
+SELECT @@session.sql_safe_updates AS new_session_value;
+new_session_value
+1
+SELECT @@global.sql_safe_updates AS global_value;
+global_value
+1
+# UPDATE without WHERE should fail in new session
+UPDATE t1 SET name = 'fail';
+ERROR HY000: You are using safe update mode and you tried to update a table without a WHERE that uses a KEY column. 
+#
+# Test 5: Verify SET GLOBAL works
+#
+SET GLOBAL sql_safe_updates = OFF;
+SELECT @@global.sql_safe_updates AS global_after_set_off;
+global_after_set_off
+0
+# Reconnect to verify new session gets the new global value
+SELECT @@session.sql_safe_updates AS new_session_inherits_global;
+new_session_inherits_global
+0
+# UPDATE without WHERE should now succeed in new session
+UPDATE t1 SET name = 'success';
+SELECT * FROM t1 ORDER BY id;
+id	name
+1	success
+2	success
+3	success
+#
+# Cleanup
+#
+SET GLOBAL sql_safe_updates = OFF;
+DROP TABLE t1;
+#
+# Test completed successfully
+#
