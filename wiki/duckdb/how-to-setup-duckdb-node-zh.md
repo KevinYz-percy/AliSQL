@@ -122,7 +122,7 @@ chmod +x init_alisql_dir.sh
 
 > 更多配置参数可参考：
 > - MySQL 8.0 官方文档：https://dev.mysql.com/doc/refman/8.0/en/
-> - DuckDB 参数参考： [AliSQL DuckDB 参数](./duckdb/duckdb_variables-zh.md)
+> - DuckDB 参数参考： [AliSQL DuckDB 参数](./duckdb_variables-zh.md)
 
 ---
 

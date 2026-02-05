@@ -100,7 +100,7 @@ duckdb_mode=ON
 force_innodb_to_duckdb=ON
 
 # DuckDB resources (0 = auto)
-duckdb_memory_limit=0
+duckdb_memory_limit=2147483648
 duckdb_threads=0
 duckdb_temp_directory=${DIR}/tmp
 EOF2
@@ -113,7 +113,7 @@ chmod +x init_alisql_dir.sh
 
 References:
 - MySQL 8.0 manual: https://dev.mysql.com/doc/refman/8.0/en/
-- DuckDB variables: [AliSQL DuckDB variables](./duckdb/duckdb_variables-zh.md)
+- DuckDB variables: [AliSQL DuckDB variables](./duckdb_variables-zh.md)
 
 ---
 
