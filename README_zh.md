@@ -197,6 +197,37 @@ AliSQL 于 2025 年 12 月正式开源，由阿里云数据库团队持续维护
 
 如有 Bug 反馈或功能建议，请通过 [GitHub Issues](https://github.com/alibaba/AliSQL/issues) 提交。
 
+## 相关工具
+
+### RDSAI CLI — AI 驱动的数据库助手
+
+<p>
+  <a href="https://github.com/aliyun/rdsai-cli"><img src="https://img.shields.io/badge/GitHub-rdsai--cli-blue?style=flat-square&logo=github" alt="RDSAI CLI"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.13+-blue.svg?style=flat-square" alt="Python 3.13+"></a>
+</p>
+
+[RDSAI CLI](https://github.com/aliyun/rdsai-cli) 是新一代 AI 驱动的数据库命令行工具，让你可以用**自然语言**与 AliSQL 和 MySQL 数据库交互。AI 代理会帮你完成 SQL 生成、执行计划分析、诊断优化等工作。
+
+```bash
+# 安装
+curl -LsSf https://raw.githubusercontent.com/aliyun/rdsai-cli/main/install.sh | sh
+
+# 连接数据库，使用自然语言查询
+rdsai --host localhost -u root -p secret -D mydb
+mysql> 分析 users 表的索引使用情况
+mysql> 显示过去一小时的慢查询
+mysql> 为什么这个查询很慢: SELECT * FROM users WHERE name LIKE '%john%'
+```
+
+**核心功能：**
+- 自然语言转 SQL（支持中英文）
+- AI 驱动的查询优化与诊断分析
+- 按 `Ctrl+E` 即时分析执行计划
+- 多模型 LLM 支持（通义千问、OpenAI、DeepSeek、Anthropic 等）
+- 自动化性能基准测试与分析报告
+
+👉 **[立即体验 RDSAI CLI](https://github.com/aliyun/rdsai-cli)**
+
 ## 社区与支持
 
 <table>

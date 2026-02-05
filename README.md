@@ -197,6 +197,37 @@ We welcome contributions of all kinds!
 
 For bugs and feature requests, please use [GitHub Issues](https://github.com/alibaba/AliSQL/issues).
 
+## Related Tools
+
+### RDSAI CLI — AI-Powered Database Assistant
+
+<p>
+  <a href="https://github.com/aliyun/rdsai-cli"><img src="https://img.shields.io/badge/GitHub-rdsai--cli-blue?style=flat-square&logo=github" alt="RDSAI CLI"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.13+-blue.svg?style=flat-square" alt="Python 3.13+"></a>
+</p>
+
+[RDSAI CLI](https://github.com/aliyun/rdsai-cli) is a next-generation, AI-powered CLI that transforms how you interact with AliSQL and MySQL databases. Describe your intent in **natural language**, and the AI agent handles the rest.
+
+```bash
+# Install
+curl -LsSf https://raw.githubusercontent.com/aliyun/rdsai-cli/main/install.sh | sh
+
+# Connect and ask in natural language
+rdsai --host localhost -u root -p secret -D mydb
+mysql> analyze index usage on users table
+mysql> show me slow queries from the last hour
+mysql> why this query is slow: SELECT * FROM users WHERE name LIKE '%john%'
+```
+
+**Key Features:**
+- Natural language to SQL conversion (English/中文)
+- AI-powered query optimization and diagnostics
+- Execution plan analysis with `Ctrl+E`
+- Multi-model LLM support (Qwen, OpenAI, DeepSeek, Anthropic, etc.)
+- Performance benchmarking with automated analysis
+
+👉 **[Get Started with RDSAI CLI](https://github.com/aliyun/rdsai-cli)**
+
 ## Community & Support
 
 <table>
