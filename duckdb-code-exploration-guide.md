@@ -6,6 +6,13 @@
 
 ---
 
+# Part 1: Foundation — The Building Blocks
+
+These steps build the foundational knowledge needed for all subsequent
+workflows: the handler contract, plugin registration, and type system.
+
+---
+
 ## Step 1: Handler Class Definition — The Contract
 
 ### Prompt
@@ -123,7 +130,13 @@ Create a reference table: MySQL type -> DuckDB type -> special notes.
 
 ---
 
-## Step 4: Write Path — How INSERT Reaches DuckDB
+# Part 2: Direct Write Path — Client INSERT to DuckDB
+
+How data gets written when a client directly INSERTs into a DuckDB table.
+
+---
+
+## Step 4: Write Path — How INSERT/UPDATE/DELETE Reaches DuckDB
 
 ### Prompt
 ```
@@ -210,92 +223,186 @@ rows/sec replication replay. Understand how it works:
 
 ---
 
-## Step 6: Read Path — How SELECT Retrieves Data
+# Part 3: Query Read Path — MySQL Parser to DuckDB Results
+
+The complete journey of a SELECT query from client to results. This covers
+the MySQL parser, optimizer, handler dispatch, DuckDB SQL translation,
+DuckDB internal execution, and result conversion back to MySQL format.
+
+---
+
+## Step 6: Complete Query Pipeline — From SQL Text to Result Set
 
 ### Prompt
 ```
-Read `storage/duckdb/ha_duckdb.cc` focusing on the read/scan methods,
-then read `storage/duckdb/duckdb_select.h` and `duckdb_select.cc`.
+Trace the COMPLETE journey of a SELECT query on a DuckDB table, from the
+moment the MySQL client sends SQL to the moment results are returned.
 
-Trace the complete journey of a SELECT query through the storage engine.
+Key files to read:
+- `sql/sql_parse.cc` (MySQL query entry point — dispatch_command)
+- `sql/sql_optimizer.cc` (query optimization)
+- `sql/sql_executor.cc` (query execution — calls handler methods)
+- `storage/duckdb/ha_duckdb.cc` (rnd_init, rnd_next, index_read_map)
+- `storage/duckdb/duckdb_select.cc` (result conversion — the core)
+- `storage/duckdb/duckdb_select.h`
+- `sql/duckdb/duckdb_query.cc` (query execution gateway to DuckDB)
+- `sql/duckdb/duckdb_context.cc` (per-thread DuckDB connection)
+- `sql/duckdb/duckdb_timezone.cc` (timezone handling for TIMESTAMP)
 
-1. Start with `ha_duckdb::rnd_init()` (around line 868):
+Trace this exact query:
+
+    SELECT user_id, COUNT(*) as cnt, SUM(amount) as total
+    FROM orders
+    WHERE created_at >= '2025-01-01'
+    GROUP BY user_id
+    HAVING total > 1000
+    ORDER BY total DESC
+    LIMIT 10;
+
+
+**Phase 1: MySQL Parser**
+
+1. How does MySQL parse this query?
+   - `dispatch_command()` in sql_parse.cc receives the SQL text
+   - The parser (Bison-generated) produces a parse tree (SELECT_LEX)
+   - What does the parse tree contain? (table refs, WHERE, GROUP BY, etc.)
+   - At this point, MySQL doesn't know it's a DuckDB table yet
+
+2. How does MySQL discover the table's storage engine?
+   - Table metadata lookup (TABLE_SHARE, frm file or data dictionary)
+   - The table was created with ENGINE=DUCKDB
+   - How does this affect subsequent optimization?
+
+
+**Phase 2: MySQL Optimizer**
+
+3. What does the MySQL optimizer do with a DuckDB table?
+   - Does it generate an execution plan? (YES — MySQL always optimizes)
+   - Does the optimizer push down WHERE, GROUP BY, HAVING, ORDER BY,
+     or LIMIT to the storage engine?
+   - What does `ha_duckdb::info()` return for row estimates?
+   - How does `ha_duckdb::index_flags()` and `table_flags()` affect
+     the optimizer's decisions?
+   - KEY QUESTION: Does MySQL try to use indexes on DuckDB tables?
+
+4. What execution plan does MySQL generate?
+   - Full table scan via rnd_init/rnd_next? Or index scan?
+   - Does MySQL plan to do GROUP BY/ORDER BY itself, or expect
+     the engine to handle it?
+
+
+**Phase 3: MySQL Executor → DuckDB Handler**
+
+5. Trace `ha_duckdb::rnd_init()` (around line 868 in ha_duckdb.cc):
    - What does `rnd_init(bool scan)` do?
    - How is the DuckDB SELECT SQL constructed?
+     - Does it include WHERE? GROUP BY? ORDER BY? LIMIT?
+     - Or does it generate `SELECT * FROM orders` and let MySQL filter?
+   - What is the exact DuckDB SQL generated for this query?
+   - Find the code that builds this SQL string
    - How is the result set obtained and stored?
    - What is the "materialization" step — are all rows fetched upfront?
 
-2. Trace `ha_duckdb::rnd_next()` (around line 914):
+6. How is the query sent to DuckDB?
+   - `duckdb_query()` in duckdb_query.cc
+   - How does it get the current thread's DuckDB connection?
+   - What session config is applied (timezone, collation)?
+   - How is the result materialized? (MaterializedResult vs streaming?)
+
+
+**Phase 4: DuckDB Internal Processing**
+
+7. What happens inside DuckDB when it receives the query?
+   - DuckDB has its own parser → optimizer → executor
+   - DuckDB uses columnar storage — how does this help for analytics?
+   - DuckDB generates a physical plan with operators:
+     - TableScan → Filter → HashAggregate → Sort → Limit
+   - How does DuckDB's vectorized execution differ from MySQL's
+     row-at-a-time model?
+
+8. Where is the performance advantage?
+   - Columnar storage: only reads `user_id`, `amount`, `created_at` columns
+   - Vectorized execution: processes thousands of rows at once
+   - Compression: columnar data compresses much better
+   - Compare: InnoDB would do a row-oriented full table scan, reading
+     ALL columns, processing one row at a time
+
+
+**Phase 5: Result Conversion — DuckDB Back to MySQL**
+
+9. Trace `ha_duckdb::rnd_next()` (around line 914):
    - How does it iterate through the DuckDB result set?
    - How does it signal end-of-data (HA_ERR_END_OF_FILE)?
    - What is the `buf` parameter and how is it populated?
 
-3. Read `store_duckdb_field_in_mysql_format()` in duckdb_select.cc (line 77+):
-   - This is the core result conversion function. Walk through each type case:
-     - Integer types (TINYINT through BIGINT, signed and unsigned)
-     - Float/Double
-     - Decimal — how is DuckDB's decimal converted to MySQL's?
-     - DATE, DATETIME, TIMESTAMP — how is timezone handling done?
-     - TIME — any special conversion?
-     - VARCHAR and BLOB — how is charset handled?
-     - JSON, ENUM, SET — special handling?
-   - How are NULL values handled?
+10. Read `store_duckdb_field_in_mysql_format()` in duckdb_select.cc (line 77+):
+    This is the core result conversion function. Walk through EVERY type case:
+    - Integer types (TINYINT through BIGINT, signed and unsigned)
+    - Float/Double
+    - Decimal — how is DuckDB's decimal converted to MySQL's fixed-point?
+    - DATE, DATETIME, TIMESTAMP — how is timezone handling done?
+      (Cross-reference with `sql/duckdb/duckdb_timezone.cc`)
+    - TIME — any special conversion?
+    - VARCHAR and BLOB — how is charset handled?
+    - JSON, ENUM, SET — special handling?
+    - How are NULL values handled?
 
-4. How does `rnd_end()` clean up?
+11. For this specific query, trace the conversion of each result column:
+    - DuckDB integer → MySQL INT (user_id)
+    - DuckDB bigint → MySQL BIGINT (cnt from COUNT(*))
+    - DuckDB decimal/double → MySQL DECIMAL (total from SUM(amount))
+    - How are NULL values handled in aggregation results?
 
-5. Look at the index access methods:
-   - What does `index_read_map()` do? Is it fully implemented?
-   - What does this mean for WHERE clause evaluation — does MySQL filter
-     results in the SQL layer, or does DuckDB handle it?
 
-6. Is there any query pushdown happening? Does the DuckDB handler push
-   WHERE clauses, JOINs, or aggregations down to DuckDB, or does it do
-   full table scans and let MySQL filter?
+**Phase 6: Division of Labor & Wire Protocol**
 
-Create an ASCII sequence diagram: MySQL executor -> rnd_init -> DuckDB query
--> rnd_next (loop) -> store_duckdb_field_in_mysql_format -> rnd_end.
+12. Who does what? Trace the division of labor:
+    - WHERE filtering: MySQL or DuckDB?
+    - GROUP BY aggregation: MySQL or DuckDB?
+    - HAVING filtering: MySQL or DuckDB?
+    - ORDER BY sorting: MySQL or DuckDB?
+    - LIMIT: MySQL or DuckDB?
+    - Answer for EACH: which engine performs it, and why?
+
+13. KEY INSIGHT: What is the "double execution" problem?
+    - MySQL optimizer may plan GROUP BY + ORDER BY
+    - DuckDB may ALSO do GROUP BY + ORDER BY internally
+    - Is there redundant work? How is this handled?
+    - Is there any query pushdown optimization to avoid this?
+
+14. Look at the index access methods:
+    - What does `index_read_map()` do? Is it fully implemented?
+    - What does this mean for WHERE clause evaluation?
+
+15. How does `rnd_end()` clean up?
+
+16. How do results get back to the MySQL client?
+    - MySQL sends column metadata (field names, types)
+    - MySQL sends rows via the MySQL wire protocol
+    - The client sees standard MySQL result set — unaware of DuckDB
+
+17. Also read `storage/duckdb/duckdb_types.cc` — what utility functions
+    does it provide? How are database/table names parsed from MySQL's
+    path format?
+
+Create an ASCII diagram showing the complete query pipeline:
+  Client SQL → MySQL Parser → MySQL Optimizer → MySQL Executor
+  → ha_duckdb::rnd_init() → DuckDB SQL construction → DuckDB Parser
+  → DuckDB Optimizer → DuckDB Executor → DuckDB Result
+  → rnd_next() loop → store_duckdb_field_in_mysql_format()
+  → MySQL wire protocol → Client
 ```
 
 ---
 
-## Step 7: Result Conversion Deep Dive
+# Part 4: Engine Infrastructure
 
-### Prompt
-```
-Read `storage/duckdb/duckdb_select.cc` (the full file, ~236 lines) and
-`storage/duckdb/duckdb_select.h`.
-
-This file handles the critical job of converting DuckDB query results back
-into MySQL's internal field format. This is where the two engines "meet."
-
-1. Examine `store_duckdb_field_in_mysql_format()` in detail:
-   - What are the input parameters? What is a `duckdb::Value`?
-   - How does it determine the MySQL field type to convert to?
-   - What is the `Field` class in MySQL? How does `store()` work on it?
-
-2. Focus on the tricky conversions:
-   - **TIMESTAMP with timezone**: How does DuckDB's `timestamptz` get converted
-     to MySQL's TIMESTAMP? Where does timezone offset come from?
-     (Cross-reference with `sql/duckdb/duckdb_timezone.cc`)
-   - **DECIMAL**: DuckDB uses arbitrary precision internally. How is the
-     decimal value extracted and stored in MySQL's fixed-point format?
-   - **BLOB vs VARCHAR**: What determines whether a DuckDB string becomes
-     a MySQL BLOB or VARCHAR? How is charset/encoding preserved?
-
-3. How are default values and generated columns handled?
-
-4. What error handling exists? What happens if a conversion fails?
-
-5. Read the test file `mysql-test/suite/duckdb/t/feature_duckdb_data_type.test`
-   to see real examples of data type round-trips. What edge cases does it test?
-
-6. Also read `storage/duckdb/duckdb_types.cc` — what utility functions does
-   it provide? How are database/table names parsed from MySQL's path format?
-```
+The supporting systems that make everything work: per-thread connections,
+the DuckDB singleton instance, and the query execution gateway.
 
 ---
 
-## Step 8: Per-Thread Context — Connection & Transaction Lifecycle
+## Step 7: Per-Thread Context — Connection & Transaction Lifecycle
 
 ### Prompt
 ```
@@ -340,7 +447,7 @@ connection and DuckDB. Every MySQL thread that touches DuckDB tables gets one.
 
 ---
 
-## Step 9: DuckDB Instance Management — Startup & Shutdown
+## Step 8: DuckDB Instance Management — Startup & Shutdown
 
 ### Prompt
 ```
@@ -384,7 +491,7 @@ and manages its lifecycle within the MySQL server process.
 
 ---
 
-## Step 10: Query Execution Gateway
+## Step 9: Query Execution Gateway
 
 ### Prompt
 ```
@@ -426,135 +533,97 @@ ultimately calls through `duckdb_query()`.
 
 ---
 
-## Step 11: Test Cases — Practical Usage Examples
+# Part 5: InnoDB to DuckDB Replication — The Complete Data Sync Path
 
-### Prompt
-```
-Explore the test directory `mysql-test/suite/duckdb/t/`.
+This is the core workflow for the DuckDB replica use case. These steps
+trace data from a client INSERT on an InnoDB primary all the way to
+it becoming queryable on a DuckDB replica.
 
-These MySQL test files are the best way to understand actual DuckDB behavior
-from a user's perspective. Read the following key test files:
-
-1. Read `mysql-test/suite/duckdb/t/create.test`:
-   - What CREATE TABLE variations are tested?
-   - What column types, constraints, and options are exercised?
-
-2. Read `mysql-test/suite/duckdb/t/ha_duckdb.test`:
-   - This is the main handler test. What operations does it exercise?
-   - What INSERT, SELECT, UPDATE, DELETE patterns are tested?
-
-3. Read `mysql-test/suite/duckdb/t/transaction.test`:
-   - How are transactions tested?
-   - What COMMIT, ROLLBACK, and implicit transaction scenarios are covered?
-
-4. Read `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch.test`:
-   - How is replication batch mode tested?
-   - What is the test setup (master-slave)?
-   - What does it verify about batch INSERT replay?
-
-5. Read `mysql-test/suite/duckdb/t/feature_duckdb_data_type.test`:
-   - What data type edge cases are tested?
-   - What boundary values are verified (MAX_INT, precision limits, etc.)?
-
-6. Read `mysql-test/suite/duckdb/t/parallel_copy_ddl.test`:
-   - How is the parallel DDL copy from InnoDB to DuckDB tested?
-   - What performance expectations are set?
-
-7. Read a few of the `alter_duckdb_*.test` files:
-   - What ALTER TABLE operations are supported?
-   - What operations fall back to copy DDL?
-
-8. Look at the corresponding result files in `mysql-test/suite/duckdb/r/`
-   to see expected outputs.
-
-Summarize: What are the 10 most interesting or surprising behaviors you found
-in the tests? What limitations or edge cases do they reveal?
-```
+**Read these steps in order — each builds on the previous one.**
 
 ---
 
-## Step 12: Design Rationale & Benchmarks
+## Step 10: The Complete Replication Path — InnoDB Write to DuckDB Sync
 
 ### Prompt
 ```
-Read `wiki/duckdb/duckdb-en.md` (or whatever wiki documentation exists in
-`wiki/duckdb/`).
-
-Also explore any other documentation files related to DuckDB in the project.
-
-Please answer the following questions:
-
-1. **Design motivation**: Why was DuckDB chosen as an analytical engine
-   alongside InnoDB? What problem does it solve?
-
-2. **Architecture decisions**:
-   - Why is DuckDB integrated as a storage engine rather than a separate
-     process or sidecar?
-   - Why use MySQL's handler interface instead of a query proxy?
-   - What are the tradeoffs of this approach?
-
-3. **Replication strategy**:
-   - How does the DuckDB replica architecture work?
-   - Why is batch replay important? How does it achieve 300K rows/sec?
-   - What is the "zero replication lag" claim based on?
-
-4. **Performance benchmarks**:
-   - What TPC-H results are reported? At what scale factor?
-   - How does DuckDB compare to InnoDB for analytical queries?
-   - What is the storage efficiency difference?
-
-5. **SQL compatibility**:
-   - What is the claimed SQL compatibility percentage?
-   - How was it measured (what test suite)?
-   - What are the known incompatibilities?
-
-6. **Operational model**:
-   - How is DuckDB intended to be deployed? (read replica? mixed?)
-   - What management overhead does it add?
-   - How does backup/recovery work?
-
-7. **Future directions**:
-   - Are there any TODOs or planned features mentioned?
-   - What limitations are acknowledged?
-
-Summarize: Write a 1-page "executive summary" of why this project exists,
-what it achieves, and what its boundaries are.
-```
-
----
-
-## Step 13: Binlog Replication to DuckDB — How CDC Works
-
-### Prompt
-```
-Explore how DuckDB receives data changes from MySQL via binlog-based
-replication (CDC). This is how a DuckDB read-replica stays in sync with
-an InnoDB primary.
+Trace the COMPLETE journey of a row written via InnoDB on the primary
+to its eventual appearance in DuckDB on the replica. This is the
+fundamental data sync mechanism — understanding it end-to-end is
+critical for anyone operating or debugging an AliSQL DuckDB replica.
 
 Key files to read:
+- `sql/handler.cc` (MySQL handler commit path)
+- `sql/binlog.cc` (binlog write path — how row events enter the binlog)
+- `sql/log_event.cc` (search for "duckdb" — binlog event application hooks)
+- `sql/rpl_rli.h` (search for "duckdb" — replication relay log info)
 - `storage/duckdb/ha_duckdb.cc` (lines 536-750 — batch state + DML handlers)
 - `sql/duckdb/duckdb_context.h` (lines 42-47 — BatchState enum)
 - `sql/duckdb/duckdb_context.cc` (lines 234-286 — duckdb_delay_commit)
-- `sql/log_event.cc` (search for "duckdb" — binlog event application hooks)
-- `sql/rpl_rli.h` (search for "duckdb" — replication relay log info)
 
-Please answer the following questions:
+Trace this exact scenario step by step:
 
-1. **Replication architecture**: DuckDB doesn't have its own replication
-   protocol. Instead, it piggybacks on MySQL's row-based replication.
-   - How does a binlog event (WRITE_ROWS, UPDATE_ROWS, DELETE_ROWS) end
-     up calling ha_duckdb::write_row() / update_row() / delete_row()?
-   - Trace the path: relay log → SQL thread → Log_event::do_apply_event()
-     → handler method. What code in `sql/log_event.cc` calls into DuckDB?
+    -- On InnoDB primary:
+    INSERT INTO orders (id, user_id, amount) VALUES (1, 42, 99.99);
+    -- With a child table:
+    INSERT INTO order_items (order_id, product_id) VALUES (1, 100);
 
-2. **Row-based event translation**: For each event type, trace how the
+
+**Phase 1: InnoDB Primary — Write + Binlog Generation**
+
+1. How does MySQL process the INSERT on InnoDB?
+   - Parser → Optimizer → Executor → ha_innobase::write_row()
+   - At what point does MySQL write to the binlog?
+   - What does a WRITE_ROWS binlog event contain? (row image format)
+   - How does `binlog_format=ROW` affect what's logged?
+   - When is the binlog event fsynced to disk?
+
+2. What about auto-increment?
+   - InnoDB resolves auto-inc values BEFORE writing to binlog
+   - The binlog contains concrete values, not auto-inc directives
+   - Verify: read the WRITE_ROWS event format — it's a full row image
+
+3. What about foreign key cascades? (CRITICAL LIMITATION)
+   - If `order_items` has `ON DELETE CASCADE` referencing `orders`,
+     and you `DELETE FROM orders WHERE id=1`:
+   - In MySQL 5.6-8.4: cascading child deletes happen INSIDE InnoDB
+     and are NOT written to the binlog (Bug #32506, 18 years unfixed)
+   - In MySQL 9.6+: FK cascades moved to SQL layer, now in binlog
+   - Since AliSQL is based on MySQL 5.6: cascading deletes WILL NOT
+     reach DuckDB, causing data inconsistency
+   - Workaround: avoid ON DELETE/UPDATE CASCADE; use explicit DML
+
+
+**Phase 2: Binlog Transmission — Primary to Replica**
+
+4. How does the binlog stream reach the replica?
+   - Binlog dump thread on primary sends events
+   - I/O thread on replica writes to relay log
+   - What is the relay log? (local copy of binlog events)
+
+
+**Phase 3: Relay Log Replay — SQL Thread to DuckDB Handler**
+
+5. Trace the SQL thread replay path:
+   - SQL thread reads relay log events
+   - `Log_event::do_apply_event()` dispatches each event
+   - For WRITE_ROWS: unpacks row image → calls `ha_duckdb::write_row(buf)`
+   - For UPDATE_ROWS: unpacks before+after images → `ha_duckdb::update_row()`
+   - For DELETE_ROWS: unpacks row image → `ha_duckdb::delete_row()`
+   - Find the exact code path in `sql/log_event.cc` where DuckDB is invoked
+
+6. Row-based event translation — for each event type, trace how the
    binary row image is translated:
    - WRITE_ROWS → ha_duckdb::write_row() → InsertConvertor or DeltaAppender
    - UPDATE_ROWS → ha_duckdb::update_row() → UpdateConvertor (with PK
      change detection via calc_pk_difference())
    - DELETE_ROWS → ha_duckdb::delete_row() → DeleteConvertor
 
-3. **Batch state determination**: Read ha_duckdb.cc lines 536-568.
+7. How does write_row() on the replica differ from a direct write?
+   - Is batch mode (DeltaAppender) used? Under what conditions?
+   - How does `duckdb_dml_in_batch` affect the path?
+
+8. Batch state determination — read ha_duckdb.cc lines 536-568.
    How does the handler decide between:
    - NOT_IN_BATCH (direct SQL per row)
    - IN_INSERT_ONLY_BATCH (appender, inserts only)
@@ -562,26 +631,56 @@ Please answer the following questions:
    What conditions trigger each? How do dml_in_batch, idempotent_flag,
    and duckdb_multi_trx_in_batch interact?
 
-4. **Relay log coordinate tracking**: Find where `xid_event_relay_log_pos`
-   and `xid_event_relay_log_name` are set in duckdb_context. Why does
-   DuckDB need to track these? How are they used during crash recovery?
 
-5. How does this compare to other CDC approaches (Debezium, Maxwell)?
-   What are the advantages of being inside the MySQL process?
+**Phase 4: Batch Accumulation + Commit (overview)**
 
-Draw an ASCII diagram: Binlog event → relay log → SQL thread →
-handler dispatch → DuckDB batch/direct path.
+9. Multiple transactions are batched into a single DuckDB commit:
+   - TX1 commits on primary → relay log has COMMIT event
+   - But DuckDB may DELAY this commit (duckdb_delay_commit)
+   - TX2, TX3, TX4 arrive → rows accumulate in DeltaAppender
+   - Batch boundary hit (256MB or 5s timeout or DDL seen)
+   - flush_appenders() → 2PC prepare → binlog sync → COMMIT
+   → **Deep-dive on batch mechanics: see Step 11**
+   → **Deep-dive on 2PC + crash recovery: see Step 12**
+
+
+**Phase 5: Data Consistency & Known Gaps**
+
+10. Relay log coordinate tracking: find where `xid_event_relay_log_pos`
+    and `xid_event_relay_log_name` are set in duckdb_context. Why does
+    DuckDB need to track these? How are they used during crash recovery?
+
+11. After the batch commits, verify:
+    - Row is now queryable in DuckDB
+    - GTID is marked as executed
+    - Relay log position is advanced
+
+12. What data is NOT synced? List all known gaps:
+    - FK cascade effects (MySQL 5.6-8.4 — Bug #32506)
+    - Temporary tables
+    - Non-deterministic functions in STATEMENT format
+    - Any other known limitations?
+
+13. How does this compare to other CDC approaches (Debezium, Maxwell)?
+    What are the advantages of being inside the MySQL process?
+
+Create a complete ASCII timeline showing: client write → InnoDB → binlog
+→ network → relay log → SQL thread → ha_duckdb → DeltaAppender → batch
+commit → queryable in DuckDB. Mark timing at each phase.
 ```
 
 ---
 
-## Step 14: Multi-Transaction Batching — 300K Rows/Sec Replay
+## Step 11: Multi-Transaction Batching — 300K Rows/Sec Replay
 
 ### Prompt
 ```
 Deep-dive into the multi-transaction batch mechanism that allows DuckDB
 to replay replication at 300K rows/sec. This is the key performance
 innovation.
+
+**Prerequisite**: Complete Step 10 first to understand where batching
+fits in the overall replication path.
 
 Key files to read:
 - `sql/duckdb/duckdb_context.cc` (lines 234-520 — batch orchestration)
@@ -641,12 +740,15 @@ into a single DuckDB commit, with GTID tracking at each step.
 
 ---
 
-## Step 15: Two-Phase Commit & Crash Recovery
+## Step 12: Two-Phase Commit & Crash Recovery
 
 ### Prompt
 ```
 Understand how DuckDB maintains crash-safe consistency with MySQL's binlog
 via two-phase commit (2PC) and idempotent replay.
+
+**Prerequisite**: Complete Steps 10-11 first to understand the replication
+and batching context.
 
 Key files to read:
 - `storage/duckdb/ha_duckdb.cc` (lines 102-183 — 2PC handlers)
@@ -730,78 +832,15 @@ Mark each crash point and its recovery strategy.
 
 ---
 
-## Step 16: Batch Replication Test Cases — Seeing It in Action
-
-### Prompt
-```
-Read the replication-related test files to understand the batch replay
-system from a behavioral perspective. These tests are the specification
-for how the system is supposed to work.
-
-Read these files in order:
-
-1. `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch.test`:
-   - What is the test topology? (master InnoDB → slave DuckDB?)
-   - What data is inserted on the master?
-   - How does the slave verify data consistency?
-   - What system variables are set for batch mode?
-
-2. `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_insert_only.test`:
-   - What is `duckdb_insert_only_flag`?
-   - How does INSERT-only batch mode differ from mixed batch?
-   - What optimizations does INSERT-only enable?
-
-3. `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx.test`:
-   - How are multiple transactions batched together?
-   - What is `duckdb_multi_trx_in_batch`?
-   - How does the test verify batch boundaries?
-
-4. `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx_crash.test`:
-   - What crash scenarios are tested?
-   - How is crash simulated? (debug sync points?)
-   - What is verified after recovery? (data consistency, GTID state?)
-
-5. `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx_with_ddl.test`:
-   - What happens when a DDL appears in the middle of a batch?
-   - Does the batch flush before the DDL?
-   - How is atomicity maintained?
-
-6. `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx_with_rotate.test`:
-   - What happens when binlog rotates during a batch?
-   - How are relay log coordinates adjusted?
-
-7. `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx_with_stop_slave.test`:
-   - What happens if STOP SLAVE is issued during a batch?
-   - Is the partial batch committed or rolled back?
-
-8. `mysql-test/suite/duckdb/t/transaction_determine_idempotent.test`:
-   - How does the system determine when idempotent replay is needed?
-   - What heuristics or markers are used?
-
-9. `mysql-test/suite/duckdb/t/duckdb_data_import_mode.test`:
-   - What is data import mode?
-   - How does it relate to initial sync / bootstrapping a DuckDB replica?
-   - What restrictions does it impose?
-
-10. `mysql-test/suite/duckdb/t/convert_all_to_duckdb_at_startup_1.test`:
-    - What does "convert all to duckdb at startup" mean?
-    - How does it migrate existing InnoDB tables to DuckDB on replica?
-
-For each test, summarize:
-- The scenario being tested
-- Key assertions / verifications
-- Any surprising or non-obvious behaviors
-- Configuration variables involved
-```
-
----
-
-## Step 17: Data Import & Initial Sync — Bootstrapping a DuckDB Replica
+## Step 13: Bootstrapping a DuckDB Replica — Initial Sync
 
 ### Prompt
 ```
 Explore how a DuckDB replica is initially bootstrapped — i.e., how
 existing InnoDB data gets into DuckDB before replication starts.
+
+**Context**: Steps 10-12 cover ongoing replication. This step covers the
+one-time setup that happens before replication begins.
 
 Key files to read:
 - `mysql-test/suite/duckdb/t/convert_all_to_duckdb_at_startup_1.test`
@@ -841,12 +880,12 @@ Please answer the following questions:
    - When would you use it vs. the auto-conversion?
 
 5. **End-to-end bootstrap sequence**: Describe the complete flow:
-   a. Start MySQL with InnoDB tables
+   a. Start MySQL with InnoDB tables on primary
    b. Enable DuckDB mode on replica
    c. Initial data migration (convert_all_to_duckdb or copy DDL)
    d. Start replication (binlog position or GTID-based)
-   e. Ongoing CDC via batch replay
-   f. DuckDB replica serves analytical queries
+   e. Ongoing CDC via batch replay (→ Steps 10-12)
+   f. DuckDB replica serves analytical queries (→ Step 6)
 
 6. **Foreign key removal**: Read `convert_all_to_duckdb_at_start_remove_fk.test`:
    - DuckDB doesn't support FKs. How are they stripped during conversion?
@@ -854,6 +893,281 @@ Please answer the following questions:
 
 Draw the complete lifecycle: InnoDB primary → bootstrap DuckDB replica
 → start replication → steady-state CDC → crash → recovery → resume.
+```
+
+---
+
+# Part 6: Transaction Isolation
+
+---
+
+## Step 14: Transaction Isolation — What Guarantees Does DuckDB Provide?
+
+### Prompt
+```
+Understand the transaction isolation model of the DuckDB storage engine
+in AliSQL, and how it interacts with MySQL's transaction framework.
+
+Key files to read:
+- `storage/duckdb/ha_duckdb.h` (table_flags — transaction capabilities)
+- `storage/duckdb/ha_duckdb.cc` (lines 102-183 — 2PC handlers,
+  lines 164-183 — duckdb_register_trx)
+- `sql/duckdb/duckdb_context.cc` (duckdb_trans_begin/commit/rollback)
+- `sql/duckdb/duckdb_context.h` (transaction state)
+- Search for "isolation" across all duckdb-related files
+- `extra/duckdb/` — DuckDB's own transaction documentation (if available)
+
+Please answer the following questions:
+
+**1. What MySQL Advertises**
+
+1. Look at `ha_duckdb::table_flags()` in ha_duckdb.h:
+   - Does it include HA_NO_TRANSACTIONS? (No → DuckDB supports transactions)
+   - Does it declare any isolation level flags?
+   - Compare with InnoDB's table_flags — what's different?
+
+2. When MySQL sets `SET TRANSACTION ISOLATION LEVEL READ COMMITTED` or
+   `REPEATABLE READ`, does DuckDB honor this?
+   - Search for isolation level handling in ha_duckdb.cc and duckdb_context.cc
+   - Is the MySQL isolation level forwarded to DuckDB?
+
+**2. What DuckDB Actually Provides**
+
+3. DuckDB uses MVCC (Multi-Version Concurrency Control) with
+   Snapshot Isolation:
+   - Each transaction gets a consistent snapshot at BEGIN time
+   - All reads within a transaction see data from that snapshot
+   - Writes are isolated from concurrent readers
+   - This is equivalent to SNAPSHOT ISOLATION (between READ COMMITTED
+     and SERIALIZABLE in SQL standard terms)
+
+4. How does this compare to MySQL's isolation levels?
+
+   | MySQL Level | InnoDB Behavior | DuckDB Behavior |
+   |-------------|-----------------|-----------------|
+   | READ UNCOMMITTED | See uncommitted rows | NOT supported (snapshot) |
+   | READ COMMITTED | See committed rows, new snapshot per statement | NOT matched (single snapshot per TX) |
+   | REPEATABLE READ | Consistent snapshot for TX duration | MATCHED (this is what DuckDB does) |
+   | SERIALIZABLE | Full serializability | NOT fully guaranteed |
+
+5. What are the practical implications?
+   - If MySQL session is set to READ COMMITTED, but DuckDB provides
+     snapshot isolation, the behavior is STRICTER than expected
+   - If MySQL session is set to SERIALIZABLE, DuckDB may allow
+     anomalies that true serializability would prevent
+   - In practice, for a read-replica workload, this rarely matters — why?
+
+**3. Transaction Lifecycle**
+
+6. Trace the complete transaction lifecycle:
+   - `duckdb_register_trx()` — how/when is DuckDB enlisted in MySQL's
+     transaction? What is `trans_register_ha()`?
+   - `duckdb_trans_begin()` — what SQL does it execute in DuckDB?
+     Is it just "BEGIN"?
+   - During the transaction: how do reads and writes interact?
+     Is there a consistent snapshot?
+   - `duckdb_prepare()` — what happens at 2PC prepare?
+   - `duckdb_commit()` / `duckdb_rollback()` — finalization
+
+7. What about autocommit?
+   - When `autocommit=ON`, each statement is its own transaction
+   - How does DuckDB handle this? Is BEGIN/COMMIT wrapped per statement?
+   - What is `OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN` check in
+     duckdb_register_trx()?
+
+**4. Replica-Specific Isolation Concerns**
+
+8. On a DuckDB replica receiving binlog events:
+   - Multiple primary transactions may be batched into one DuckDB TX
+   - What isolation does a reader see during batch accumulation?
+   - Can a reader see a partial batch? (i.e., TX1 committed on primary
+     but TX2 not yet — can a DuckDB reader see TX1's rows before
+     the batch commits?)
+   - Answer: No — the entire batch is atomic in DuckDB. Readers see
+     either ALL or NONE of the batched transactions.
+
+9. What about concurrent reads during batch replay?
+   - DuckDB's MVCC allows readers during writes
+   - Readers see the last committed snapshot
+   - The batch being accumulated is invisible until COMMIT
+   - This provides READ COMMITTED or better for replica readers
+
+10. XA transactions:
+    - Read `duckdb_register_trx()` — it checks `check_in_xa(true)`
+    - DuckDB does NOT support XA transactions
+    - What happens if an XA transaction tries to touch a DuckDB table?
+
+**5. Comparison & Gaps**
+
+11. Create a comparison table:
+
+    | Feature | InnoDB | DuckDB in AliSQL |
+    |---------|--------|-----------------|
+    | Isolation model | MVCC, configurable | MVCC, snapshot only |
+    | Default level | REPEATABLE READ | Snapshot (≈ REPEATABLE READ) |
+    | READ UNCOMMITTED | Supported | No (always snapshot) |
+    | READ COMMITTED | Supported | No (always snapshot) |
+    | REPEATABLE READ | Supported | Yes (native behavior) |
+    | SERIALIZABLE | Supported | No (snapshot, not serializable) |
+    | Gap locks | Yes | No |
+    | Savepoints | Yes | No (stub in AliSQL) |
+    | XA | Yes | No |
+
+12. For a read-replica use case (the primary design goal):
+    - Why does isolation level matter less?
+    - What guarantees does the user actually need?
+    - How does batch commit affect perceived consistency?
+
+Summarize: Write a clear statement of "what isolation guarantees you get
+when querying a DuckDB replica" that an application developer can rely on.
+```
+
+---
+
+# Part 7: Verification & Reference
+
+Test cases that validate the system, design documentation, and quick
+reference tables.
+
+---
+
+## Step 15: Test Cases — Practical Usage & Replication Verification
+
+### Prompt
+```
+Explore the test directory `mysql-test/suite/duckdb/t/`.
+
+These MySQL test files are the best way to understand actual DuckDB behavior
+from a user's perspective AND to verify the replication system works correctly.
+
+**General functionality tests:**
+
+1. Read `mysql-test/suite/duckdb/t/create.test`:
+   - What CREATE TABLE variations are tested?
+   - What column types, constraints, and options are exercised?
+
+2. Read `mysql-test/suite/duckdb/t/ha_duckdb.test`:
+   - This is the main handler test. What operations does it exercise?
+   - What INSERT, SELECT, UPDATE, DELETE patterns are tested?
+
+3. Read `mysql-test/suite/duckdb/t/transaction.test`:
+   - How are transactions tested?
+   - What COMMIT, ROLLBACK, and implicit transaction scenarios are covered?
+
+4. Read `mysql-test/suite/duckdb/t/feature_duckdb_data_type.test`:
+   - What data type edge cases are tested?
+   - What boundary values are verified (MAX_INT, precision limits, etc.)?
+
+5. Read a few of the `alter_duckdb_*.test` files:
+   - What ALTER TABLE operations are supported?
+   - What operations fall back to copy DDL?
+
+**Replication & batch replay tests:**
+
+6. Read `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch.test`:
+   - What is the test topology? (master InnoDB → slave DuckDB?)
+   - What data is inserted on the master?
+   - How does the slave verify data consistency?
+   - What system variables are set for batch mode?
+
+7. Read `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_insert_only.test`:
+   - What is `duckdb_insert_only_flag`?
+   - How does INSERT-only batch mode differ from mixed batch?
+
+8. Read `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx.test`:
+   - How are multiple transactions batched together?
+   - What is `duckdb_multi_trx_in_batch`?
+   - How does the test verify batch boundaries?
+
+9. Read `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx_crash.test`:
+   - What crash scenarios are tested?
+   - How is crash simulated? (debug sync points?)
+   - What is verified after recovery? (data consistency, GTID state?)
+
+10. Read `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx_with_ddl.test`:
+    - What happens when a DDL appears in the middle of a batch?
+    - Does the batch flush before the DDL?
+
+11. Read `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx_with_rotate.test`:
+    - What happens when binlog rotates during a batch?
+
+12. Read `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx_with_stop_slave.test`:
+    - What happens if STOP SLAVE is issued during a batch?
+
+13. Read `mysql-test/suite/duckdb/t/transaction_determine_idempotent.test`:
+    - How does the system determine when idempotent replay is needed?
+
+**Bootstrap & data import tests:**
+
+14. Read `mysql-test/suite/duckdb/t/duckdb_data_import_mode.test`:
+    - What is data import mode? What restrictions does it impose?
+
+15. Read `mysql-test/suite/duckdb/t/convert_all_to_duckdb_at_startup_1.test`:
+    - How does auto-convert InnoDB→DuckDB work?
+
+16. Read `mysql-test/suite/duckdb/t/parallel_copy_ddl.test`:
+    - How is parallel DDL copy tested?
+
+17. Look at the corresponding result files in `mysql-test/suite/duckdb/r/`
+    to see expected outputs.
+
+For each test, summarize:
+- The scenario being tested
+- Key assertions / verifications
+- Any surprising or non-obvious behaviors
+- Configuration variables involved
+
+What are the 10 most interesting or surprising behaviors across all tests?
+```
+
+---
+
+## Step 16: Design Rationale & Benchmarks
+
+### Prompt
+```
+Read `wiki/duckdb/duckdb-en.md` (or whatever wiki documentation exists in
+`wiki/duckdb/`).
+
+Also explore any other documentation files related to DuckDB in the project.
+
+Please answer the following questions:
+
+1. **Design motivation**: Why was DuckDB chosen as an analytical engine
+   alongside InnoDB? What problem does it solve?
+
+2. **Architecture decisions**:
+   - Why is DuckDB integrated as a storage engine rather than a separate
+     process or sidecar?
+   - Why use MySQL's handler interface instead of a query proxy?
+   - What are the tradeoffs of this approach?
+
+3. **Replication strategy**:
+   - How does the DuckDB replica architecture work?
+   - Why is batch replay important? How does it achieve 300K rows/sec?
+   - What is the "zero replication lag" claim based on?
+
+4. **Performance benchmarks**:
+   - What TPC-H results are reported? At what scale factor?
+   - How does DuckDB compare to InnoDB for analytical queries?
+   - What is the storage efficiency difference?
+
+5. **SQL compatibility**:
+   - What is the claimed SQL compatibility percentage?
+   - How was it measured (what test suite)?
+   - What are the known incompatibilities?
+
+6. **Operational model**:
+   - How is DuckDB intended to be deployed? (read replica? mixed?)
+   - What management overhead does it add?
+   - How does backup/recovery work?
+
+7. **Future directions**:
+   - Are there any TODOs or planned features mentioned?
+   - What limitations are acknowledged?
+
+Summarize: Write a 1-page "executive summary" of why this project exists,
+what it achieves, and what its boundaries are.
 ```
 
 ---
@@ -952,9 +1266,13 @@ exercise" — proving you understand the full integration.
 | `cmake/duckdb.cmake` | DuckDB build configuration |
 | `wiki/duckdb/` | Design documentation |
 
-### Key Test Files (Replication & Crash Recovery)
+### Key Test Files
 | File | What It Tests |
 |------|---------------|
+| `mysql-test/suite/duckdb/t/ha_duckdb.test` | Core handler operations |
+| `mysql-test/suite/duckdb/t/create.test` | CREATE TABLE variations |
+| `mysql-test/suite/duckdb/t/feature_duckdb_data_type.test` | Data type edge cases |
+| `mysql-test/suite/duckdb/t/transaction.test` | Transaction COMMIT/ROLLBACK |
 | `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch.test` | Basic replication batch replay |
 | `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx.test` | Multi-transaction batching |
 | `mysql-test/suite/duckdb/t/ha_duckdb_rpl_batch_multi_trx_crash.test` | Crash during batch replay |
@@ -966,3 +1284,26 @@ exercise" — proving you understand the full integration.
 | `mysql-test/suite/duckdb/t/convert_all_to_duckdb_at_startup_1.test` | Auto-convert InnoDB→DuckDB |
 | `mysql-test/suite/duckdb/t/duckdb_data_import_mode.test` | Bulk data import mode |
 | `mysql-test/suite/duckdb/t/parallel_copy_ddl.test` | Parallel DDL copy |
+
+---
+
+## Step-to-Workflow Map
+
+For quick navigation, here's how the steps map to the two primary workflows:
+
+### Workflow A: Direct DuckDB Usage
+```
+Step 1-3 (Foundation) → Step 4-5 (Write) → Step 6 (Read) → Step 14 (Isolation)
+```
+
+### Workflow B: InnoDB → DuckDB Replication Replica
+```
+Step 1-3 (Foundation) → Step 13 (Bootstrap) → Step 10 (Replication Path)
+→ Step 11 (Batching) → Step 12 (Crash Recovery) → Step 6 (Query on Replica)
+→ Step 14 (Isolation)
+```
+
+### Infrastructure (supporting both workflows)
+```
+Step 7 (Per-Thread Context) + Step 8 (Instance Management) + Step 9 (Query Gateway)
+```
