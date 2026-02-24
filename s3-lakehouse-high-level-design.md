@@ -242,34 +242,93 @@ AliSQL already has CDC from InnoDB to DuckDB via binlog replication:
 Phase 3 extends this pipeline to also write to S3.
 
 **What ships:**
-- Background S3 sync thread that periodically exports DuckDB data to S3 as Parquet files
-- Configurable sync policy: time-based (every N minutes) or size-based (every N MB of changes)
-- Iceberg table format support — writes produce new Iceberg snapshots, not just raw Parquet files
+- Background CDC-to-S3 thread that captures InnoDB changes and writes **incremental delta files** to S3
+- Initial full table export when a table is first enrolled for S3 sync
+- Configurable batch policy: time-based (every N seconds) or size-based (every N MB of buffered changes)
+- Iceberg table format — each batch produces a new Iceberg snapshot with only the changed rows
+- Periodic compaction to merge small delta files into larger optimized files
 - DuckDB queries transparently read from S3 instead of local storage for synced tables
 - MySQL system variables: `duckdb_s3_sync_enabled`, `duckdb_s3_sync_interval`, `duckdb_s3_sync_path`
 
-**Data flow:**
+**Data flow — Initial load (one-time per table):**
 ```
-InnoDB change → binlog → DuckDB applies locally
-                                  │
-                         S3 Sync Thread (background)
-                                  │
-                         ┌────────▼─────────┐
-                         │  For each synced  │
-                         │  table:           │
-                         │                   │
-                         │  COPY table TO    │
-                         │  's3://bucket/    │
-                         │   db/table/'      │
-                         │  (FORMAT PARQUET) │
-                         └────────┬──────────┘
-                                  │
-                                  ▼
-                         S3: db/table/
-                              ├── part-0001.parquet
-                              ├── part-0002.parquet
-                              └── _metadata/
+ALTER TABLE orders SECONDARY_LOAD
+         │
+         ▼
+Full table export:
+  COPY orders TO 's3://bucket/db/orders/' (FORMAT PARQUET)
+         │
+         ▼
+S3: db/orders/data/
+     ├── init-0001.parquet    (e.g., 128 MB)
+     ├── init-0002.parquet
+     └── init-0003.parquet
+
+Iceberg: metadata.json → manifest list → manifest → references above files
+         Snapshot #0 (type = APPEND, all existing rows)
 ```
+
+**Data flow — Ongoing CDC (incremental):**
+```
+InnoDB write → binlog → CDC thread picks up change
+                              │
+                     Buffers changed rows in memory
+                              │
+                     Batch boundary reached
+                     (every duckdb_s3_sync_interval seconds
+                      or duckdb_s3_sync_batch_size bytes)
+                              │
+                     ┌────────▼──────────────────────────┐
+                     │  Write ONLY changed rows:          │
+                     │                                    │
+                     │  INSERTs → new data file           │
+                     │    data/batch-042-data.parquet      │
+                     │    (contains only inserted rows)    │
+                     │                                    │
+                     │  DELETEs → delete file              │
+                     │    data/batch-042-deletes.parquet   │
+                     │    (equality deletes: PK values)    │
+                     │                                    │
+                     │  UPDATEs → delete file + data file  │
+                     │    (decomposed as DELETE + INSERT)  │
+                     └────────┬───────────────────────────┘
+                              │
+                     Commit new Iceberg snapshot
+                     (atomic pointer swap in metadata.json)
+                              │
+                              ▼
+S3: db/orders/
+     ├── data/
+     │    ├── init-0001.parquet       ← initial load (large)
+     │    ├── init-0002.parquet
+     │    ├── batch-001-data.parquet  ← CDC delta (small, e.g., 5 MB)
+     │    ├── batch-001-del.parquet   ← CDC deletes
+     │    ├── batch-002-data.parquet
+     │    ├── ...
+     │    └── batch-042-data.parquet  ← latest batch
+     └── metadata/
+          ├── v0.metadata.json        ← initial snapshot
+          ├── v1.metadata.json
+          └── v42.metadata.json       ← current (points to all files)
+```
+
+**Compaction (periodic maintenance):**
+```
+Over time, many small delta files accumulate:
+  500 batches × ~5 MB each = 2,500 small files
+
+Compaction merges them into fewer, larger files:
+  Before: 500 data files + 200 delete files
+  After:  10 optimized data files (deletes applied, rows merged)
+
+Triggered via:
+  • Automatic background thread (when file count exceeds threshold)
+  • Manual: CALL dbms_duckdb.query("SELECT iceberg_compact_table('orders')")
+
+Old files retained briefly for time travel, then garbage-collected.
+```
+
+**Key point**: The CDC thread never re-exports the entire table. Each batch writes only the rows that changed during that window. This makes the write path efficient even for large tables with high write rates.
 
 **Iceberg vs raw Parquet:**
 
