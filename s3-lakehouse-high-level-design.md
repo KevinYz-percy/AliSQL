@@ -282,7 +282,7 @@ InnoDB change → binlog → DuckDB applies locally
 | Concurrent reads | Possible stale reads during write | MVCC via snapshots |
 | Glue compatibility | Limited | Full |
 
-**Recommendation**: Start with raw Parquet export (simpler), add Iceberg support as an option. DuckDB's DuckLake extension could manage the Iceberg catalog internally.
+**Recommendation**: Use Iceberg as the primary format. The query optimization benefits (manifest pruning, column-level stats, snapshot isolation) and interoperability with external engines (Athena, Spark, Trino) outweigh the added write complexity. DuckDB's `iceberg` or `ducklake` extension handles metadata management. See **Appendix A.4** for a detailed comparison.
 
 ---
 
@@ -510,8 +510,211 @@ Phase 5: External Catalog Federation
 
 2. **Partial table sync**: Should CDC sync export entire tables or support partition-level sync? Time-partitioned tables (e.g., events by date) benefit from partition-level export where only the latest partition is synced frequently.
 
-3. **DELETE/UPDATE handling in Parquet**: Parquet is append-only. Updates/deletes require either rewriting entire Parquet files or using Iceberg's merge-on-read approach. Iceberg is strongly preferred for tables with updates.
+3. **DELETE/UPDATE handling in Parquet**: Parquet is append-only. Updates/deletes require either Copy-on-Write (rewrite affected files) or Merge-on-Read (write delete files/vectors, merge at query time). Iceberg v2+ supports both. **Recommendation**: Use MOR with delete files for CDC — see **Appendix A.2** for details.
 
 4. **Resource isolation**: How much memory/CPU should DuckDB use vs InnoDB? Current `duckdb_memory_limit` and `duckdb_threads` provide coarse control. Fine-grained resource isolation (e.g., cgroups, IO priority) may be needed for production HTAP workloads.
 
 5. **Multi-table consistency for S3 reads**: If a query joins two S3-synced tables, they may be at different sync points. Should we enforce cross-table snapshot consistency? Iceberg snapshots make this possible but add complexity.
+
+---
+
+## Appendix A: Iceberg Metadata Architecture
+
+Understanding Iceberg's metadata layers is essential for Phases 3–5, as the CDC engine must produce valid Iceberg metadata alongside data files.
+
+### A.1 Metadata Layer Hierarchy
+
+Iceberg organizes metadata in five layers, each referencing the layer below:
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Layer 1: Catalog                                           │
+│                                                            │
+│  Maps table names → current metadata.json location         │
+│  Examples: AWS Glue, DuckLake, Iceberg REST, Hive          │
+│  Stored: External service or database                      │
+└───────────────────────────┬────────────────────────────────┘
+                            │ points to
+                            ▼
+┌────────────────────────────────────────────────────────────┐
+│ Layer 2: metadata.json (table metadata)                    │
+│                                                            │
+│  Stores:                                                   │
+│  • Table UUID, format version (v1/v2/v3)                   │
+│  • Current schema + full schema history                    │
+│  • Partition spec (how data is partitioned)                │
+│  • Sort order (how data is sorted within files)            │
+│  • Snapshot list + current snapshot pointer                 │
+│  • Table properties (e.g., write.format.default)           │
+│  Stored: S3 (e.g., s3://bucket/db/table/metadata/v3.metadata.json) │
+└───────────────────────────┬────────────────────────────────┘
+                            │ snapshots[current] points to
+                            ▼
+┌────────────────────────────────────────────────────────────┐
+│ Layer 3: Manifest List (snap-xxx.avro)                     │
+│                                                            │
+│  One per snapshot. Lists all manifest files in the         │
+│  snapshot.                                                 │
+│  Stores per manifest entry:                                │
+│  • Manifest file path                                      │
+│  • Partition field summary (min/max per partition column)   │
+│  • Added/deleted file counts                               │
+│  • Content type: DATA or DELETE                            │
+│  Stored: S3 (Avro format)                                  │
+└───────────────────────────┬────────────────────────────────┘
+                            │ lists manifest files
+                            ▼
+┌────────────────────────────────────────────────────────────┐
+│ Layer 4: Manifest Files (.avro)                            │
+│                                                            │
+│  Each manifest tracks a subset of data files.              │
+│  Stores per data file entry:                               │
+│  • File path on S3                                         │
+│  • File format (Parquet)                                   │
+│  • Partition tuple values                                  │
+│  • Record count                                            │
+│  • File size in bytes                                      │
+│  • Column-level stats:                                     │
+│    - null_count per column                                 │
+│    - nan_count per column (for floats)                     │
+│    - lower_bound per column (min value)                    │
+│    - upper_bound per column (max value)                    │
+│  • Split offsets (for parallel reads)                      │
+│  • Snapshot status: ADDED / EXISTING / DELETED             │
+│  Stored: S3 (Avro format)                                  │
+└───────────────────────────┬────────────────────────────────┘
+                            │ references
+                            ▼
+┌────────────────────────────────────────────────────────────┐
+│ Layer 5: Data Files (.parquet)                             │
+│                                                            │
+│  The actual columnar data in Apache Parquet format.        │
+│  Stores:                                                   │
+│  • Column chunks with compression (Snappy/Zstd/LZ4)       │
+│  • Row group metadata (min/max, null counts)               │
+│  • Parquet footer with schema + offsets                    │
+│  Stored: S3 (e.g., s3://bucket/db/table/data/part-001.parquet) │
+└────────────────────────────────────────────────────────────┘
+```
+
+### A.2 How CDC Operations Map to Iceberg Metadata
+
+Each CDC sync batch from InnoDB produces a new **Iceberg snapshot**. The mapping:
+
+```
+InnoDB binlog events          Iceberg metadata operations
+─────────────────────         ──────────────────────────────
+
+INSERT (row)              →   New data file (.parquet) with inserted rows
+                              Manifest entry: status = ADDED
+                              New manifest list → new snapshot (type = APPEND)
+
+DELETE (row)              →   Iceberg v2: Equality delete file listing
+                                          deleted primary key values
+                              Iceberg v3: Deletion vector (bitmap) referencing
+                                          row positions in existing data files
+                              Manifest entry: content = DELETE
+                              New snapshot (type = OVERWRITE)
+
+UPDATE (row)              →   Decomposed as DELETE (old row) + INSERT (new row)
+                              Both a delete file/vector AND a new data file
+                              New snapshot (type = OVERWRITE)
+
+DDL (ALTER TABLE          →   New schema added to metadata.json schema list
+      ADD COLUMN)              Current schema pointer updated
+                              Existing data files unchanged (schema evolution)
+
+Batch boundary            →   New snapshot committed atomically
+(end of sync interval)         Old snapshots retained for time travel
+```
+
+**Batch → Snapshot mapping detail:**
+
+```
+                Timeline
+─────────────────────────────────────────────────────────►
+
+  CDC batch 1              CDC batch 2              CDC batch 3
+  (60s window)             (60s window)             (60s window)
+  ┌──────────┐            ┌──────────┐            ┌──────────┐
+  │ 500 INSERTs           │ 200 INSERTs           │ 100 DELETEs
+  │ 50 DELETEs            │ 30 UPDATEs            │ 300 INSERTs
+  └─────┬─────┘           └─────┬─────┘           └─────┬─────┘
+        │                       │                       │
+        ▼                       ▼                       ▼
+  Snapshot #1              Snapshot #2              Snapshot #3
+  ┌──────────────┐        ┌──────────────┐        ┌──────────────┐
+  │ data-001.pq  │        │ data-002.pq  │        │ data-003.pq  │
+  │ (500 rows)   │        │ (230 rows)   │        │ (300 rows)   │
+  │ del-001.pq   │        │ del-002.pq   │        │ del-003.pq   │
+  │ (50 deletes) │        │ (30 deletes) │        │ (100 deletes)│
+  └──────────────┘        └──────────────┘        └──────────────┘
+```
+
+**Copy-on-Write (COW) vs Merge-on-Read (MOR):**
+
+| Strategy | How DELETEs/UPDATEs work | Pros | Cons |
+|----------|--------------------------|------|------|
+| **COW** | Rewrite entire affected data files without deleted/updated rows | Fast reads (no merge overhead) | Slow writes (rewrites large files) |
+| **MOR** | Write delete files or deletion vectors; merge at query time | Fast writes (only write deltas) | Slightly slower reads (merge at query) |
+
+**Recommendation for CDC**: Use **MOR** (Merge-on-Read) with Iceberg v2 delete files initially. It minimizes S3 write amplification during CDC sync. DuckDB handles the merge efficiently at query time using its vectorized engine.
+
+### A.3 How DuckDB Uses Iceberg Metadata for Query Optimization
+
+DuckDB's `iceberg` extension leverages Iceberg's metadata hierarchy to skip reading unnecessary data:
+
+```
+SELECT SUM(amount) FROM orders WHERE region = 'us-east-1' AND order_date = '2025-06-15'
+
+  Step 1: Read metadata.json
+          → Find current snapshot pointer
+          → O(1) lookup, single small file read from S3
+
+  Step 2: Read manifest list (snap-xxx.avro)
+          → Check partition field summaries per manifest
+          → Skip manifests whose partition range excludes 'us-east-1' / '2025-06-15'
+          → Eliminates entire manifest groups without reading individual entries
+
+  Step 3: Read remaining manifest files (.avro)
+          → Check column-level stats (lower_bound, upper_bound) per data file
+          → Skip data files where region range doesn't include 'us-east-1'
+          → Skip data files where order_date min > '2025-06-15' or max < '2025-06-15'
+          → File-level pruning within each manifest
+
+  Step 4: Read only matching data files (.parquet)
+          → Apply Parquet row group pruning (min/max in footer)
+          → Read only relevant column chunks (columnar projection)
+          → Execute aggregation in DuckDB's vectorized engine
+
+  Result: Reads perhaps 3 of 500 Parquet files (99.4% pruned)
+```
+
+**Pruning layers summary:**
+
+| Pruning Layer | What It Uses | Granularity | Typical Reduction |
+|---------------|-------------|-------------|-------------------|
+| **Manifest list** pruning | Partition field summaries | Per-manifest (group of files) | 80–95% of manifests skipped |
+| **Manifest file** pruning | Column-level min/max/null stats | Per-data-file | 50–90% of remaining files skipped |
+| **Parquet row group** pruning | Row group min/max in Parquet footer | Per-row-group (within a file) | 20–50% of row groups skipped |
+| **Column projection** | Schema metadata | Per-column | Only requested columns read |
+
+### A.4 Iceberg vs Plain Parquet for S3 Storage
+
+This comparison informs the Phase 3 decision of which format to use for CDC output:
+
+| Capability | Plain Parquet on S3 | Iceberg (Parquet + metadata) |
+|-----------|---------------------|------------------------------|
+| **File discovery** | `S3 LIST` on prefix — O(n) on file count, slow for large tables | Read manifest — O(1) metadata lookup, lists exact files |
+| **Partition pruning** | Manual path conventions (e.g., `year=2025/month=06/`) | Automatic via partition specs in metadata; works with hidden partitioning |
+| **Column-level pruning** | Only Parquet footer stats (per-file, requires opening each file) | Manifest stores column min/max per file; prune before opening any file |
+| **Schema evolution** | Breaking — new columns require rewriting all files or reader logic | Native — old files read with evolved schema, nulls filled for new columns |
+| **Concurrent access** | No isolation — readers may see partial writes | Snapshot isolation — readers see consistent point-in-time view |
+| **Time travel** | Not possible (files overwritten) | Built-in — query any historical snapshot by ID or timestamp |
+| **DELETE/UPDATE** | Requires full file rewrite | Delete files (v2) or deletion vectors (v3) — no rewrite |
+| **Compaction** | Manual external process | `iceberg.compact_table()` or DuckLake `ducklake_cleanup_old_files()` |
+| **Glue/Athena/Spark compat** | Limited (no metadata, no schema) | Full (standard Iceberg tables, works with any Iceberg-compatible engine) |
+| **Write complexity** | Trivial (`COPY TO` Parquet) | Moderate (must produce valid metadata.json, manifests, etc.) |
+| **Storage overhead** | Data only | Data + ~1% metadata overhead |
+
+**Recommendation**: Use **Iceberg** as the primary format for Phase 3. The benefits (file pruning, schema evolution, snapshot isolation, interoperability) far outweigh the added write complexity. DuckDB's `iceberg` or `ducklake` extension handles most of the metadata management. Reserve plain Parquet as a "quick start" option for users who want simplicity over features.
