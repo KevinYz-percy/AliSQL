@@ -320,13 +320,33 @@ Over time, many small delta files accumulate:
 Compaction merges them into fewer, larger files:
   Before: 500 data files + 200 delete files
   After:  10 optimized data files (deletes applied, rows merged)
-
-Triggered via:
-  • Automatic background thread (when file count exceeds threshold)
-  • Manual: CALL dbms_duckdb.query("SELECT iceberg_compact_table('orders')")
-
-Old files retained briefly for time travel, then garbage-collected.
 ```
+
+**Compaction implementation options** (no new code required for core logic):
+
+| Approach | How | Compaction Built-in? |
+|----------|-----|---------------------|
+| **DuckLake path** (recommended) | `CHECKPOINT ducklake_catalog` — runs merge + rewrite + cleanup in one call | Yes — `ducklake_merge_adjacent_files`, `ducklake_rewrite_data_files`, `ducklake_cleanup_old_files` all built-in |
+| **AWS S3 Tables** | Fully managed by AWS — automatic compaction, no user action needed | Yes (transparent) |
+| **DuckDB Iceberg extension** | No compaction functions exist today (MOR writes only, no table maintenance) | **No** — would need external Spark `rewrite_data_files` or custom implementation |
+
+**What we need to build for compaction:**
+
+If using **DuckLake** (recommended path): **zero compaction code**. We only need a background thread or cron-like trigger that periodically calls:
+```sql
+-- Bundled: runs merge, rewrite, expire snapshots, cleanup in sequence
+CHECKPOINT ducklake_catalog;
+
+-- Or individual fine-grained control:
+CALL ducklake_merge_adjacent_files('ducklake_catalog', 'orders');
+CALL ducklake_rewrite_data_files('ducklake_catalog', 'orders');
+CALL ducklake_expire_snapshots('ducklake_catalog');
+CALL ducklake_cleanup_old_files('ducklake_catalog');
+```
+
+If using **DuckDB Iceberg extension** directly: we would need to either (a) build our own compaction logic (read small files → merge → write large files → commit new snapshot), or (b) invoke Spark/PyIceberg externally. This is a significant reason to prefer the DuckLake path.
+
+Old files retained briefly for time travel, then garbage-collected by `ducklake_cleanup_old_files`.
 
 **Key point**: The CDC thread never re-exports the entire table. Each batch writes only the rows that changed during that window. This makes the write path efficient even for large tables with high write rates.
 
@@ -771,7 +791,7 @@ This comparison informs the Phase 3 decision of which format to use for CDC outp
 | **Concurrent access** | No isolation — readers may see partial writes | Snapshot isolation — readers see consistent point-in-time view |
 | **Time travel** | Not possible (files overwritten) | Built-in — query any historical snapshot by ID or timestamp |
 | **DELETE/UPDATE** | Requires full file rewrite | Delete files (v2) or deletion vectors (v3) — no rewrite |
-| **Compaction** | Manual external process | `iceberg.compact_table()` or DuckLake `ducklake_cleanup_old_files()` |
+| **Compaction** | Manual external process | DuckLake: `CHECKPOINT` (built-in merge + rewrite + cleanup). DuckDB Iceberg ext: not supported — needs Spark `rewrite_data_files` or custom code |
 | **Glue/Athena/Spark compat** | Limited (no metadata, no schema) | Full (standard Iceberg tables, works with any Iceberg-compatible engine) |
 | **Write complexity** | Trivial (`COPY TO` Parquet) | Moderate (must produce valid metadata.json, manifests, etc.) |
 | **Storage overhead** | Data only | Data + ~1% metadata overhead |
